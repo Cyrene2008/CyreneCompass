@@ -51,7 +51,30 @@
             </article></div>
             <div class="button-row"><button class="primary-btn" @click="addAction(false)"><Icon icon="fluent:add-20-regular" />{{ t('addAction') }}</button><button class="secondary-btn" @click="addAction(true)"><Icon icon="fluent:folder-add-20-regular" />{{ t('addSubmenu') }}</button></div>
           </section>
-          <section v-else key="about"><h1>{{ t('about') }}</h1><div class="about-card"><img src="/cyrene.png" alt="Cyrene" /><div><h2>Cyreneの罗盘</h2><p>{{ t('aboutLead') }}</p><p class="muted">{{ t('version') }} {{ version }} · Tray · Single instance</p></div></div><button class="danger-btn" @click="beginExit"><Icon icon="fluent:power-24-regular" />{{ t('quit') }}</button></section>
+          <section v-else key="about">
+            <h1>{{ t('about') }}</h1>
+            <div class="about-hero">
+              <img src="/cyrene.png" alt="Cyrene" />
+              <div><h2>Cyreneの罗盘</h2><p>{{ t('aboutLead') }}</p><p class="muted">{{ t('version') }} {{ version }}</p></div>
+            </div>
+            <div class="about-details">
+              <div><span>{{ t('author') }}</span><strong>Cyrene2008 (星海昔涟)</strong></div>
+              <div><span>{{ t('copyright') }}</span><strong>Copyright (C) Cyrene2008 2026. All Rights Reserved.</strong></div>
+              <div><span>{{ t('license') }}</span><button class="inline-link" @click="openExternal('https://www.gnu.org/licenses/gpl-3.0.html')">GNU GPLv3<Icon icon="fluent:open-16-regular" /></button></div>
+            </div>
+            <div class="about-actions"><button class="secondary-btn" @click="openExternal('https://github.com/Cyrene2008/CyreneCompass')"><Icon icon="fluent:code-24-regular" />{{ t('openRepository') }}</button></div>
+            <div class="update-section">
+              <div class="update-heading"><div><h2>{{ t('softwareUpdate') }}</h2><p>{{ updateStatusText }}</p></div><button class="secondary-btn" :disabled="updateState.checking || updateState.downloading" @click="checkForUpdates(false)"><Icon :icon="updateState.checking ? 'fluent:arrow-sync-24-regular' : 'fluent:arrow-clockwise-24-regular'" :class="{ spinning: updateState.checking }" />{{ updateState.checking ? t('checkingUpdate') : t('checkUpdate') }}</button></div>
+              <template v-if="updateState.available">
+                <div class="update-release"><strong>{{ t('newVersion') }} {{ updateState.version }}</strong><button v-if="updateState.releaseUrl" class="inline-link" @click="openExternal(updateState.releaseUrl)">{{ t('releaseNotes') }}<Icon icon="fluent:open-16-regular" /></button></div>
+                <button class="primary-btn" :disabled="updateState.downloading || !updateState.url" @click="downloadUpdate"><Icon icon="fluent:arrow-download-24-regular" />{{ updateState.downloading ? t('installingUpdate') : t('downloadInstall') }}</button>
+              </template>
+              <div v-if="updateState.downloading" class="update-progress" role="progressbar" :aria-valuenow="Math.round(updateState.progress)" aria-valuemin="0" aria-valuemax="100"><span :style="{ width: `${updateState.progress}%` }"></span></div>
+              <p v-if="updateState.downloading" class="update-progress-text">{{ t('downloadProgress') }} {{ Math.round(updateState.progress) }}%</p>
+              <p v-if="updateState.errorKey || updateState.error" class="update-error">{{ t('updateFailed') }}：{{ updateState.errorKey ? t(updateState.errorKey) : updateState.error }}</p>
+            </div>
+            <button class="danger-btn" @click="beginExit"><Icon icon="fluent:power-24-regular" />{{ t('quit') }}</button>
+          </section>
           </Transition>
         </main>
       </div>
@@ -78,9 +101,10 @@ import FluentSwitch from './components/FluentSwitch.vue'
 import FluentNumberInput from './components/FluentNumberInput.vue'
 import NumberField from './components/SettingNumberField.vue'
 import { clientOffsetToPhysical, createPointerMoveState, exceedsDragThreshold, mouseDragTarget, touchDragTarget } from './utils/physicalDrag'
+import { CURRENT_VERSION, checkForUpdates, downloadUpdate, updateState } from './updater'
 
 addCollection(fluentIcons)
-const version = '26.0.0'; const mode = ref('ball'); const section = ref('general'); const breadcrumb = ref([]); const editBreadcrumb = ref([]); const toast = ref(''); const gridRef = ref(); const shellRef = ref(); const iconPickerItem = ref(null); const iconSearch = ref(''); const exitStage = ref(0); const systemAccent = ref('#0078d4'); let idleTimer; let ballPointer; let centerPointer; let titlebarPointer; let transitioning = false; const cleanups = []
+const version = CURRENT_VERSION; const mode = ref('ball'); const section = ref('general'); const breadcrumb = ref([]); const editBreadcrumb = ref([]); const toast = ref(''); const gridRef = ref(); const shellRef = ref(); const iconPickerItem = ref(null); const iconSearch = ref(''); const exitStage = ref(0); const systemAccent = ref('#0078d4'); let idleTimer; let ballPointer; let centerPointer; let titlebarPointer; let transitioning = false; const cleanups = []
 const iconNames = Object.keys(fluentIcons.icons).map(name => `fluent:${name}`)
 const baseItems = () => [{ id:'1',label:'演示文稿',icon:'fluent:slide-text-24-regular',target:'powerpnt.exe'},{id:'2',label:'浏览器',icon:'fluent:globe-24-regular',target:'https://www.bing.com'},{id:'3',label:'文件',icon:'fluent:folder-24-regular',target:'explorer.exe'},{id:'4',label:'截图',icon:'fluent:screenshot-24-regular',target:'snippingtool.exe'},{id:'5',label:'进程查看',icon:'fluent:code-24-regular',target:'Get-Process | Select-Object -First 5',kind:'script'},{id:'6',label:'终端',icon:'fluent:window-dev-tools-24-regular',target:'wt.exe'},{id:'7',label:'计算器',icon:'fluent:calculator-24-regular',target:'calc.exe'},{id:'8',label:'教学工具',icon:'fluent:toolbox-24-regular',children:[{id:'8-1',label:'记事本',icon:'fluent:notepad-24-regular',target:'notepad.exe'}]}]
 let saved = null; try { saved = JSON.parse(localStorage.getItem('cyrene-compass-settings') || 'null') } catch {}
@@ -99,6 +123,7 @@ const ballTextLines = computed(() => {const chars=Array.from(settings.value.ball
 const shellStyle = computed(() => { const scale = mode.value === 'ball' ? 1 : settings.value.uiScale / 100; const accent = settings.value.theme === 'fluent' ? systemAccent.value : settings.value.theme === 'peach' ? DEFAULT_ACCENT : settings.value.accent; return {...createThemeVariables(accent, settings.value.dark, settings.value.theme === 'fluent'),'--ui-scale':scale,'--item-min':`${32/scale}px`,'--icon-size':`${settings.value.iconSize}px`,'--item-font-size':`${settings.value.fontSize}px`,'--font-ui':`'${settings.value.fontFamily}', 'HarmonyOS', 'Segoe UI Variable', sans-serif`,'--panel-alpha':settings.value.compassOpacity/100} })
 const ballStyle = computed(() => ({width:`${settings.value.ballSize}px`,height:`${settings.value.ballSize}px`,opacity:settings.value.ballOpacity/100,background:settings.value.ballStyle==='image'?'transparent':settings.value.ballColor,'--ball-text-size':`${Math.max(12,settings.value.ballSize*(ballTextLines.value.length>1?.235:.285))}px`}))
 const exitText = computed(() => t(exitStage.value === 1 ? 'quit1' : exitStage.value === 2 ? 'quit2' : 'quit3'))
+const updateStatusText = computed(() => {if(updateState.value.checking)return t('checkingUpdate');if(updateState.value.available)return `${t('updateAvailable')} ${updateState.value.version}`;if(updateState.value.checked&&!updateState.value.errorKey&&!updateState.value.error)return t('latestVersion');return t('updateLead')})
 function persist(){ settings.value.items=editableItems.value; localStorage.setItem('cyrene-compass-settings',JSON.stringify(settings.value)); noteActivity() }
 async function setTheme(v){settings.value.theme=v;if(v==='peach')settings.value.accent=DEFAULT_ACCENT;if(v==='fluent')await refreshSystemAccent();persist()}
 function showToast(v){toast.value=v;setTimeout(()=>toast.value='',2200)}
@@ -142,9 +167,10 @@ function itemTypeLabel(item){if(item.children)return t('submenuType');if(item.ki
 function onPageEnter(el,done){gsap.fromTo(el,{opacity:0,x:18},{opacity:1,x:0,duration:.28,ease:'power3.out',onComplete:done})}
 function onPageLeave(el,done){gsap.to(el,{opacity:0,x:-12,duration:.16,ease:'power2.in',onComplete:done})}
 async function refreshSystemAccent(){try{systemAccent.value=await invoke('system_accent')}catch{systemAccent.value='#0078d4'}}
+async function openExternal(url){try{await invoke('open_external',{url})}catch(e){showToast(String(e))}}
 async function applyUiScale(){settings.value.uiScale=uiScaleDraft.value;persist();if(mode.value==='settings'){const scale=settings.value.uiScale/100;try{await invoke('set_window_mode',{mode:'settings',opacity:1,width:1120*scale,height:760*scale,animate:true})}catch{}}}
 function preventGlobalShortcuts(e){if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a')e.preventDefault()}
 function preventDrag(e){e.preventDefault()}
-onMounted(async()=>{document.addEventListener('keydown',preventGlobalShortcuts,true);document.addEventListener('dragstart',preventDrag,true);await refreshSystemAccent();try{if(settings.value.ballPosition)await invoke('restore_ball_position',settings.value.ballPosition);await invoke('main_window_ready');cleanups.push(await getCurrentWindow().onDragDropEvent(e=>{if(e.payload.type==='drop'&&mode.value==='settings'&&section.value==='actions')ingestPaths(e.payload.paths)}));cleanups.push(await listen('compass-show-requested',openCompass));cleanups.push(await listen('compass-settings-requested',openSettings))}catch{}})
+onMounted(async()=>{document.addEventListener('keydown',preventGlobalShortcuts,true);document.addEventListener('dragstart',preventDrag,true);await refreshSystemAccent();checkForUpdates(true);try{if(settings.value.ballPosition)await invoke('restore_ball_position',settings.value.ballPosition);await invoke('main_window_ready');cleanups.push(await getCurrentWindow().onDragDropEvent(e=>{if(e.payload.type==='drop'&&mode.value==='settings'&&section.value==='actions')ingestPaths(e.payload.paths)}));cleanups.push(await listen('compass-show-requested',openCompass));cleanups.push(await listen('compass-settings-requested',openSettings))}catch{}})
 onBeforeUnmount(()=>{clearTimeout(idleTimer);document.removeEventListener('keydown',preventGlobalShortcuts,true);document.removeEventListener('dragstart',preventDrag,true);cleanups.forEach(fn=>fn())})
 </script>

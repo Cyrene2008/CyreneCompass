@@ -1,6 +1,8 @@
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::fs;
 use serde::{Deserialize, Serialize};
 use base64::Engine;
 use std::sync::{Mutex, atomic::{AtomicBool, Ordering}};
@@ -15,6 +17,8 @@ const INSTANCE_PING: &[u8] = b"CYRENE_COMPASS_SHOW\n";
 const INSTANCE_ACK: &[u8] = b"CYRENE_COMPASS_ACK\n";
 static READY: AtomicBool = AtomicBool::new(false);
 static BALL_ANCHOR: Mutex<Option<(i32, i32)>> = Mutex::new(None);
+const UPDATE_URL_PREFIX: &str = "https://github.com/Cyrene2008/CyreneCompass/releases/download/";
+const UPDATE_MIN_INSTALLER_SIZE: usize = 1024 * 1024;
 
 #[cfg(target_os = "windows")]
 fn hidden_command(program: &str) -> Command {
@@ -65,6 +69,141 @@ fn restore_ball_position(app: tauri::AppHandle, x: i32, y: i32) -> Result<(), St
     let target_x = x.clamp(left, (right - size.width as i32).max(left));
     let target_y = y.clamp(top, (bottom - size.height as i32).max(top));
     win.set_position(PhysicalPosition::new(target_x, target_y)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn check_update() -> Result<serde_json::Value, String> {
+    let urls = [
+        "https://api.github.com/repos/Cyrene2008/CyreneCompass/releases/latest",
+        "https://api.kkgithub.com/repos/Cyrene2008/CyreneCompass/releases/latest",
+    ];
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|error| error.to_string())?;
+    for url in urls {
+        if let Ok(response) = client
+            .get(url)
+            .header("User-Agent", "CyreneCompass")
+            .header("Accept", "application/vnd.github.v3+json")
+            .send()
+            .await
+        {
+            if response.status().is_success() {
+                if let Ok(release) = response.json::<serde_json::Value>().await { return Ok(release); }
+            }
+        }
+    }
+    Err("无法连接到更新服务器".into())
+}
+
+fn update_installer_path(file_name: &str) -> Result<PathBuf, String> {
+    let safe_name = Path::new(file_name).file_name().and_then(|value| value.to_str()).ok_or("安装包文件名无效")?;
+    if safe_name != file_name || !safe_name.starts_with("CyreneCompass_") || !safe_name.ends_with("_x64-setup.exe") {
+        return Err("安装包文件名不属于 CyreneCompass 官方格式".into());
+    }
+    let directory = std::env::temp_dir().join("CyreneCompass").join("updates");
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory.join(safe_name))
+}
+
+async fn download_update_bytes(app: &tauri::AppHandle, url: &str, expected_size: u64) -> Result<Vec<u8>, String> {
+    if !url.starts_with(UPDATE_URL_PREFIX) { return Err("更新地址不属于 CyreneCompass 官方发布源".into()); }
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let candidates = [
+        url.to_string(),
+        format!("https://gh-proxy.com/{}", url),
+        format!("https://gh.昔涟.cn/{}", url),
+    ];
+    let mut failures = Vec::new();
+    for candidate in candidates {
+        match client.get(&candidate).header("User-Agent", "CyreneCompass").header("Accept", "application/octet-stream").send().await {
+            Ok(mut response) if response.status().is_success() => {
+                let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("").to_ascii_lowercase();
+                if content_type.contains("text/html") || content_type.contains("application/json") {
+                    failures.push(format!("{} 返回了非安装程序内容", candidate));
+                    continue;
+                }
+                let total = if expected_size > 0 { expected_size } else { response.content_length().unwrap_or(0) };
+                let mut bytes = Vec::with_capacity(total.min(usize::MAX as u64) as usize);
+                let mut last_progress = 0u8;
+                let _ = app.emit("update-download-progress", 0u8);
+                loop {
+                    match response.chunk().await {
+                        Ok(Some(chunk)) => {
+                            bytes.extend_from_slice(&chunk);
+                            if total > 0 {
+                                let progress = ((bytes.len() as u64 * 99) / total).min(99) as u8;
+                                if progress > last_progress { last_progress = progress; let _ = app.emit("update-download-progress", progress); }
+                            }
+                        }
+                        Ok(None) => break,
+                        Err(error) => { failures.push(format!("{} 下载中断：{}", candidate, error)); bytes.clear(); break; }
+                    }
+                }
+                if bytes.len() < UPDATE_MIN_INSTALLER_SIZE { failures.push(format!("{} 安装包体积异常", candidate)); continue; }
+                if expected_size > 0 && bytes.len() as u64 != expected_size { failures.push(format!("{} 安装包大小校验失败", candidate)); continue; }
+                if !bytes.starts_with(b"MZ") { failures.push(format!("{} 不是有效的 Windows 安装程序", candidate)); continue; }
+                let _ = app.emit("update-download-progress", 100u8);
+                return Ok(bytes);
+            }
+            Ok(response) => failures.push(format!("{} 返回 HTTP {}", candidate, response.status())),
+            Err(error) => failures.push(format!("{}：{}", candidate, error)),
+        }
+    }
+    Err(format!("更新下载失败：{}", failures.join("；")))
+}
+
+#[tauri::command]
+async fn download_and_launch_update(app: tauri::AppHandle, url: String, file_name: String, expected_size: u64) -> Result<serde_json::Value, String> {
+    let path = update_installer_path(&file_name)?;
+    let bytes = download_update_bytes(&app, &url, expected_size).await?;
+    let partial = path.with_extension("exe.part");
+    let _ = fs::remove_file(&partial);
+    fs::write(&partial, &bytes).map_err(|error| error.to_string())?;
+    let _ = fs::remove_file(&path);
+    fs::rename(&partial, &path).map_err(|error| error.to_string())?;
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        let wide = |value: &std::ffi::OsStr| value.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+        let verb = wide(std::ffi::OsStr::new("open"));
+        let file = wide(path.as_os_str());
+        let result = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) } as isize;
+        if result <= 32 { return Err(format!("无法启动更新安装程序：{}", result)); }
+    }
+    let exit_handle = app.clone();
+    thread::spawn(move || { thread::sleep(Duration::from_millis(1500)); exit_handle.exit(0); });
+    Ok(serde_json::json!({ "success": true, "filePath": path.to_string_lossy(), "size": bytes.len() }))
+}
+
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    let repository = "https://github.com/Cyrene2008/CyreneCompass";
+    let repository_url = url == repository || url.strip_prefix(repository).is_some_and(|suffix| suffix.starts_with('/'));
+    let license_url = matches!(url.as_str(), "https://www.gnu.org/licenses/gpl-3.0.html" | "https://www.gnu.org/licenses/gpl-3.0.en.html");
+    if !(repository_url || license_url) {
+        return Err("不允许打开未经授权的外部地址".into());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        let wide = |value: &std::ffi::OsStr| value.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+        let verb = wide(std::ffi::OsStr::new("open"));
+        let file = wide(std::ffi::OsStr::new(&url));
+        let result = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) } as isize;
+        if result <= 32 { return Err(format!("无法打开外部链接：{}", result)); }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -357,5 +496,5 @@ pub fn run() {
             if let Ok(hwnd) = window.hwnd() { set_no_activate(hwnd.0, true); }
         }
         Ok(())
-    }).invoke_handler(tauri::generate_handler![main_window_ready, set_ball_anchor, restore_ball_position, set_window_mode, system_accent, inspect_path, read_visual_data_url, execute_action, configure_startup, quit_app]).run(tauri::generate_context!()).expect("error while running Cyrene Compass");
+    }).invoke_handler(tauri::generate_handler![main_window_ready, set_ball_anchor, restore_ball_position, set_window_mode, system_accent, inspect_path, read_visual_data_url, execute_action, configure_startup, check_update, download_and_launch_update, open_external, quit_app]).run(tauri::generate_context!()).expect("error while running Cyrene Compass");
 }
