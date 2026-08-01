@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Cyreneの罗盘",
+  "version": "26.0.0",
+  "identifier": "cn.cyrene2008.compass",
+  "build": { "frontendDist": "../dist", "devUrl": "http://localhost:5173", "beforeDevCommand": "npm run dev", "beforeBuildCommand": "npm run build" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [{ "label": "main", "title": "Cyreneの罗盘", "width": 88, "height": 88, "minWidth": 44, "minHeight": 44, "maxWidth": 1800, "maxHeight": 1200, "center": true, "visible": true, "decorations": false, "transparent": true, "resizable": false, "skipTaskbar": true, "alwaysOnTop": true, "focus": false, "shadow": false, "backgroundColor": "#00000000" }],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "useLocalToolsDir": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": { "type": "embedBootstrapper" },
+      "nsis": {
+        "installMode": "perMachine",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+# JavaScript
+/node_modules/
+/dist/
+/coverage/
+/.vite/
+
+# Rust and Tauri generated output
+/target/
+/src-tauri/target/
+/src-tauri/gen/
+
+# Local environment and caches
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+
+# Windows and compiler artifacts
+Thumbs.db
+Desktop.ini
+*.pdb
+*.ilk
+*.exp
+
+# Editors and operating systems
+/.idea/
+/.vscode/
+.DS_Store

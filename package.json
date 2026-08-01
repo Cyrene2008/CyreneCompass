@@ -1,0 +1,30 @@
+{
+  "name": "cyrene-compass",
+  "version": "26.0.0",
+  "description": "Cyreneの罗盘 - Fluent quick launcher for Windows",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node --test tests/*.test.mjs",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build && node scripts/rename-installer.mjs",
+    "tauri:build:uiaccess": "set CYRENE_UIACCESS=1&& tauri build && node scripts/rename-installer.mjs"
+  },
+  "dependencies": {
+    "@iconify-json/fluent": "^1.2.54",
+    "@iconify/vue": "^4.3.0",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "gsap": "^3.13.0",
+    "pinia": "^3.0.3",
+    "vue": "^3.5.17"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "@vitejs/plugin-vue": "^5.2.4",
+    "vite": "^6.3.5"
+  }
+}
