@@ -4,12 +4,7 @@ Cyreneの罗盘是面向 Windows 10/11 与触屏一体机的 Fluent 风格快捷
 
 当前稳定版本：**26.0.0（初次发布）**。安装包可从 [GitHub Releases](https://github.com/Cyrene2008/CyreneCompass/releases/tag/v26.0.0) 下载。
 
-发布页提供两个版本：
-
-- `CyreneCompass_26.0.0_x64-setup.exe`：推荐的 UIAccess 版。首次安装需要管理员批准，安装器会部署项目公钥证书并固定安装到 `%ProgramFiles%\CyreneCompass`；之后日常启动按当前用户身份运行，不需要每次弹出 UAC。
-- `CyreneCompass_26.0.0_x64-standard-setup.exe`：普通版。安装到当前用户目录，不安装证书，也不具备 UIAccess，适合没有管理员凭据的电脑。
-
-两个版本使用相同的应用标识和配置目录，不能并排安装；安装另一个版本会替换当前版本。内置更新只选择与当前版本类型匹配的安装包。
+发布页提供一个适用于普通用户的安装包：`CyreneCompass_26.0.0_x64-setup.exe`。安装到当前用户目录，不需要安装证书，也不要求用户拥有管理员凭据。
 
 ## 当前功能
 
@@ -29,9 +24,9 @@ Cyreneの罗盘是面向 Windows 10/11 与触屏一体机的 Fluent 风格快捷
 - 支持文件路径、URI、URL、PowerShell 脚本，以及通过 `ShellExecuteW("runas")` 进行的管理员执行。
 - 托盘常驻；右键菜单仅提供“打开设置”，退出只能在设置页经过三次确认完成。
 - 本机回环 IPC 单实例限制，可检测不同完整性级别启动的已有实例。
-- `TOPMOST + WS_EX_NOACTIVATE`：悬浮球和罗盘保持置顶且不主动抢夺 PPT 等应用的焦点；进入设置时临时恢复焦点以便输入。
+- `TOPMOST + WS_EX_NOACTIVATE`：悬浮球和罗盘可显示在普通 UWP 应用及 PPT 放映上方，且不主动抢夺焦点；进入设置时临时恢复焦点以便输入。系统安全桌面、锁屏、登录界面和 `Win+Tab` 不在覆盖范围内。
 - 高优先级登录计划任务与普通用户注册表启动项。开机启动直接显示悬浮球，不启动到托盘。
-- Per-Monitor V2 DPI 清单，用于多屏和运行时缩放变化的基础适配；从屏幕边角展开时会约束在悬浮球所在显示器的工作区内。
+- Per-Monitor V2 DPI 清单，用于多屏和运行时缩放变化的基础适配；从屏幕边角展开时会约束在悬浮球所在显示器的工作区内。启动恢复位置时会完整校验屏幕工作区，越界、压到任务栏或异常坐标会回到主屏中央并自动修正记录。
 - 内置更新检查、安装包下载、文件名/大小/Windows PE 文件头校验与安装器启动；关于页也提供仓库与 GPLv3 链接。
 
 ## 开发
@@ -57,44 +52,17 @@ npm run dev
 
 ## 构建
 
-同时构建普通版和 UIAccess 版：
+构建 Windows x64 安装包：
 
 ```powershell
 npm run tauri:build
 ```
 
-只构建普通版：
-
-```powershell
-npm run tauri:build:standard
-```
-
-只构建 UIAccess 版：
-
-```powershell
-npm run tauri:build:uiaccess
-```
-
 安装包输出为：
 
 - `src-tauri/target/release/bundle/nsis/CyreneCompass_26.0.0_x64-setup.exe`
-- `src-tauri/target/release/bundle/nsis/CyreneCompass_26.0.0_x64-standard-setup.exe`
 
-普通开发与测试构建使用 `uiAccess=false`，无需代码签名即可启动。
-
-### UIAccess 发布构建
-
-UIAccess 不是管理员提权。UIAccess 版仍以当前交互用户身份运行，但 Windows 要求 `uiAccess=true` 的程序满足以下条件：
-
-1. 使用受目标电脑信任的 Authenticode 代码签名证书签名。
-2. 安装在受保护目录，例如 `%ProgramFiles%`。
-3. 安装器和最终 EXE 的签名链、时间戳与更新流程均保持可信。
-
-首次运行 `npm run tauri:build:uiaccess` 时，构建脚本会在当前用户的证书存储中创建项目专用代码签名证书，并把不含私钥的公钥导出到 `src-tauri/certificates/CyreneCompassUIAccess.cer`。公钥可以安全提交和分发；私钥、PFX 及其密码不得进入仓库。
-
-UIAccess 安装器会把公钥加入目标电脑的本机信任存储，将程序固定安装到 Program Files，并使用同一证书签署后续更新。首次安装需要管理员权限；没有管理员凭据时应使用普通版。
-
-UIAccess 只覆盖正常交互桌面中的高完整性和 UWP 窗口，不保证覆盖 `Win+Tab` 任务视图，也不能进入锁屏、Ctrl+Alt+Del 或 Winlogon 安全桌面。
+应用清单固定使用 `uiAccess=false`。项目不安装自签名证书，不复制系统进程令牌，也不要求安装到受保护目录。
 
 ## 权限与启动设计
 
@@ -109,7 +77,7 @@ UIAccess 只覆盖正常交互桌面中的高完整性和 UWP 窗口，不保证
 ```text
 src/                         Vue 界面、主题、i18n、离线 Fluent 图标
 src-tauri/src/lib.rs         Windows 窗口、托盘、IPC、动作与启动任务
-src-tauri/windows-*.xml      普通与 UIAccess 应用清单
+src-tauri/windows-app-manifest.xml  Windows 应用清单
 public/cyrene.png            应用 Logo
 ```
 
@@ -131,3 +99,4 @@ public/cyrene.png            应用 Logo
 - 支持文件、快捷方式、URI、URL、PowerShell 脚本、管理员执行及 Windows Shell 图标解析。
 - 支持自定义主题、文字球、图片/GIF 球、自定义动作图标、透明度、尺寸、字体和自动收起。
 - 提供多屏/DPI 边界处理、手动物理坐标拖动、单实例 IPC、托盘、置顶与不抢焦点能力。
+- 使用单一普通用户安装包，不包含 UIAccess 证书或令牌借用逻辑。
