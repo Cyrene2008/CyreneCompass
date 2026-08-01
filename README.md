@@ -1,6 +1,6 @@
 # Cyreneの罗盘
 
-Cyreneの罗盘是面向 Windows 10/11 与触屏一体机的 Fluent 风格快捷启动器。它使用 Vue 3、Tauri 2 与 GSAP 构建，默认主题色为桃粉色，并提供自定义单色主题与 Fluent 系统蓝主题。
+Cyreneの罗盘是面向 Windows 10/11 与触屏一体机的 Fluent 风格快捷启动器。它使用 Vue 3、Tauri 2 与 GSAP 构建，默认主题色为桃粉色，并提供自定义单色主题与跟随 Windows 强调色的 Fluent 主题。
 
 当前稳定版本：**26.0.0（初次发布）**。安装包可从 [GitHub Releases](https://github.com/Cyrene2008/CyreneCompass/releases/tag/v26.0.0) 下载。
 
@@ -25,6 +25,7 @@ Cyreneの罗盘是面向 Windows 10/11 与触屏一体机的 Fluent 风格快捷
 - `TOPMOST + WS_EX_NOACTIVATE`：悬浮球和罗盘保持置顶且不主动抢夺 PPT 等应用的焦点；进入设置时临时恢复焦点以便输入。
 - 高优先级登录计划任务与普通用户注册表启动项。开机启动直接显示悬浮球，不启动到托盘。
 - Per-Monitor V2 DPI 清单，用于多屏和运行时缩放变化的基础适配；从屏幕边角展开时会约束在悬浮球所在显示器的工作区内。
+- 内置更新检查、安装包下载、文件名/大小/Windows PE 文件头校验与安装器启动；关于页也提供仓库与 GPLv3 链接。
 
 ## 开发
 
@@ -94,7 +95,12 @@ public/cyrene.png            应用 Logo
 
 ## 说明
 
-项目当前版本为 `26.0.0`。配置保存在 WebView 的本地存储中。仓库许可证见 [LICENSE](./LICENSE)。
+项目当前版本为 `26.0.0`。配置保存在 WebView 的本地存储中。
+
+- 作者：Cyrene2008 (星海昔涟)
+- 版权：Copyright (C) Cyrene2008 2026. All Rights Reserved.
+- 开源协议：[GNU General Public License v3.0](./LICENSE)
+- 项目仓库：[Cyrene2008/CyreneCompass](https://github.com/Cyrene2008/CyreneCompass)
 
 ## 版本历史
 
