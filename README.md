@@ -4,6 +4,13 @@ Cyreneの罗盘是面向 Windows 10/11 与触屏一体机的 Fluent 风格快捷
 
 当前稳定版本：**26.0.0（初次发布）**。安装包可从 [GitHub Releases](https://github.com/Cyrene2008/CyreneCompass/releases/tag/v26.0.0) 下载。
 
+发布页提供两个版本：
+
+- `CyreneCompass_26.0.0_x64-setup.exe`：推荐的 UIAccess 版。首次安装需要管理员批准，安装器会部署项目公钥证书并固定安装到 `%ProgramFiles%\CyreneCompass`；之后日常启动按当前用户身份运行，不需要每次弹出 UAC。
+- `CyreneCompass_26.0.0_x64-standard-setup.exe`：普通版。安装到当前用户目录，不安装证书，也不具备 UIAccess，适合没有管理员凭据的电脑。
+
+两个版本使用相同的应用标识和配置目录，不能并排安装；安装另一个版本会替换当前版本。内置更新只选择与当前版本类型匹配的安装包。
+
 ## 当前功能
 
 - 常驻桌面的可拖动悬浮球，左键或触摸展开罗盘；右键与触屏长按不会触发操作。
@@ -50,31 +57,44 @@ npm run dev
 
 ## 构建
 
-普通安装包构建：
+同时构建普通版和 UIAccess 版：
 
 ```powershell
 npm run tauri:build
 ```
 
-安装包输出为 `src-tauri/target/release/bundle/nsis/CyreneCompass_26.0.0_x64-setup.exe`。
+只构建普通版：
 
-普通开发与测试构建使用 `uiAccess=false`，无需代码签名即可启动。
+```powershell
+npm run tauri:build:standard
+```
 
-### UIAccess 发布构建
-
-UIAccess 不是可以直接借用的系统证书，也不能使用 Windows 登录界面的私钥。Windows 要求 `uiAccess=true` 的程序满足以下条件：
-
-1. 使用受目标电脑信任的 Authenticode 代码签名证书签名。
-2. 安装在受保护目录，例如 `%ProgramFiles%`。
-3. 安装器和最终 EXE 的签名链、时间戳与更新流程均保持可信。
-
-生成启用 UIAccess 清单的构建：
+只构建 UIAccess 版：
 
 ```powershell
 npm run tauri:build:uiaccess
 ```
 
-该命令只嵌入 `uiAccess=true` 清单，不会自动创建或盗用证书。发布流水线仍需使用项目自己的可信证书对安装器和 EXE 签名，并确保安装到 Program Files。未正确签名或安装位置不安全时，Windows 可能拒绝启动 UIAccess 程序。
+安装包输出为：
+
+- `src-tauri/target/release/bundle/nsis/CyreneCompass_26.0.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/nsis/CyreneCompass_26.0.0_x64-standard-setup.exe`
+
+普通开发与测试构建使用 `uiAccess=false`，无需代码签名即可启动。
+
+### UIAccess 发布构建
+
+UIAccess 不是管理员提权。UIAccess 版仍以当前交互用户身份运行，但 Windows 要求 `uiAccess=true` 的程序满足以下条件：
+
+1. 使用受目标电脑信任的 Authenticode 代码签名证书签名。
+2. 安装在受保护目录，例如 `%ProgramFiles%`。
+3. 安装器和最终 EXE 的签名链、时间戳与更新流程均保持可信。
+
+首次运行 `npm run tauri:build:uiaccess` 时，构建脚本会在当前用户的证书存储中创建项目专用代码签名证书，并把不含私钥的公钥导出到 `src-tauri/certificates/CyreneCompassUIAccess.cer`。公钥可以安全提交和分发；私钥、PFX 及其密码不得进入仓库。
+
+UIAccess 安装器会把公钥加入目标电脑的本机信任存储，将程序固定安装到 Program Files，并使用同一证书签署后续更新。首次安装需要管理员权限；没有管理员凭据时应使用普通版。
+
+UIAccess 只覆盖正常交互桌面中的高完整性和 UWP 窗口，不保证覆盖 `Win+Tab` 任务视图，也不能进入锁屏、Ctrl+Alt+Del 或 Winlogon 安全桌面。
 
 ## 权限与启动设计
 
