@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 export const CURRENT_VERSION = '26.0.0'
-export const BUILD_VARIANT = import.meta.env?.VITE_CYRENE_BUILD_VARIANT === 'uiaccess' ? 'uiaccess' : 'standard'
 
 export const updateState = ref({
   checked: false,
@@ -22,10 +21,8 @@ export const updateState = ref({
 
 const normalizeVersion = value => String(value || '').replace(/^v/i, '').trim()
 
-export function isInstallerForBuild(name, variant = BUILD_VARIANT) {
-  const normalized = String(name || '').toLowerCase()
-  if (variant === 'uiaccess') return /^cyrenecompass_.+_x64-setup\.exe$/.test(normalized)
-  return /^cyrenecompass_.+_x64-standard-setup\.exe$/.test(normalized)
+export function isInstaller(name) {
+  return /^cyrenecompass_.+_x64-setup\.exe$/i.test(String(name || ''))
 }
 
 export function compareVersions(left, right) {
@@ -46,7 +43,7 @@ export async function checkForUpdates(silent = false) {
   try {
     const release = await invoke('check_update')
     const version = normalizeVersion(release?.tag_name)
-    const asset = (release?.assets || []).find(item => isInstallerForBuild(item?.name))
+    const asset = (release?.assets || []).find(item => isInstaller(item?.name))
     const available = compareVersions(version, CURRENT_VERSION) > 0
     updateState.value = {
       ...updateState.value,
