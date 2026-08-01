@@ -10,8 +10,9 @@
     "test": "node --test tests/*.test.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build && node scripts/rename-installer.mjs",
-    "tauri:build:uiaccess": "set CYRENE_UIACCESS=1&& tauri build && node scripts/rename-installer.mjs"
+    "tauri:build": "npm run tauri:build:standard && npm run tauri:build:uiaccess",
+    "tauri:build:standard": "set VITE_CYRENE_BUILD_VARIANT=standard&& tauri build && node scripts/rename-installer.mjs standard",
+    "tauri:build:uiaccess": "pwsh -NoProfile -File scripts/build-uiaccess.ps1"
   },
   "dependencies": {
     "@iconify-json/fluent": "^1.2.54",

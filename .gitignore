@@ -22,6 +22,10 @@ Desktop.ini
 *.pdb
 *.ilk
 *.exp
+*.pfx
+*.pvk
+*.key
+/signing-secrets/
 
 # Editors and operating systems
 /.idea/

@@ -1,0 +1,25 @@
+{
+  "bundle": {
+    "resources": {
+      "certificates/CyreneCompassUIAccess.cer": "certificates/CyreneCompassUIAccess.cer"
+    },
+    "windows": {
+      "signCommand": {
+        "cmd": "pwsh",
+        "args": [
+          "-NoProfile",
+          "-File",
+          "../scripts/sign-uiaccess.ps1",
+          "%1"
+        ]
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "template": "windows-uiaccess-installer.nsi",
+        "installerHooks": "windows-uiaccess-installer-hooks.nsh",
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico"
+      }
+    }
+  }
+}

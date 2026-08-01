@@ -1,4 +1,5 @@
 fn main() {
+    println!("cargo:rerun-if-env-changed=CYRENE_UIACCESS");
     #[cfg(target_os = "windows")]
     {
         let manifest = if std::env::var("CYRENE_UIACCESS").ok().as_deref() == Some("1") {
