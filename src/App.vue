@@ -101,6 +101,7 @@ import FluentSwitch from './components/FluentSwitch.vue'
 import FluentNumberInput from './components/FluentNumberInput.vue'
 import NumberField from './components/SettingNumberField.vue'
 import { clientOffsetToPhysical, createPointerMoveState, exceedsDragThreshold, mouseDragTarget, touchDragTarget } from './utils/physicalDrag'
+import { positionForRestore } from './utils/windowPosition'
 import { BUILD_VARIANT, CURRENT_VERSION, checkForUpdates, downloadUpdate, updateState } from './updater'
 
 addCollection(fluentIcons)
@@ -171,6 +172,6 @@ async function openExternal(url){try{await invoke('open_external',{url})}catch(e
 async function applyUiScale(){settings.value.uiScale=uiScaleDraft.value;persist();if(mode.value==='settings'){const scale=settings.value.uiScale/100;try{await invoke('set_window_mode',{mode:'settings',opacity:1,width:1120*scale,height:760*scale,animate:true})}catch{}}}
 function preventGlobalShortcuts(e){if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a')e.preventDefault()}
 function preventDrag(e){e.preventDefault()}
-onMounted(async()=>{document.addEventListener('keydown',preventGlobalShortcuts,true);document.addEventListener('dragstart',preventDrag,true);await refreshSystemAccent();checkForUpdates(true);try{if(settings.value.ballPosition)await invoke('restore_ball_position',settings.value.ballPosition);await invoke('main_window_ready');cleanups.push(await getCurrentWindow().onDragDropEvent(e=>{if(e.payload.type==='drop'&&mode.value==='settings'&&section.value==='actions')ingestPaths(e.payload.paths)}));cleanups.push(await listen('compass-show-requested',openCompass));cleanups.push(await listen('compass-settings-requested',openSettings))}catch{}})
+onMounted(async()=>{document.addEventListener('keydown',preventGlobalShortcuts,true);document.addEventListener('dragstart',preventDrag,true);await refreshSystemAccent();checkForUpdates(true);try{if(settings.value.ballPosition){const restored=await invoke('restore_ball_position',positionForRestore(settings.value.ballPosition));if(restored?.reset){settings.value.ballPosition={x:restored.x,y:restored.y};persist()}}}catch{}try{await invoke('main_window_ready');cleanups.push(await getCurrentWindow().onDragDropEvent(e=>{if(e.payload.type==='drop'&&mode.value==='settings'&&section.value==='actions')ingestPaths(e.payload.paths)}));cleanups.push(await listen('compass-show-requested',openCompass));cleanups.push(await listen('compass-settings-requested',openSettings))}catch{}})
 onBeforeUnmount(()=>{clearTimeout(idleTimer);document.removeEventListener('keydown',preventGlobalShortcuts,true);document.removeEventListener('dragstart',preventDrag,true);cleanups.forEach(fn=>fn())})
 </script>

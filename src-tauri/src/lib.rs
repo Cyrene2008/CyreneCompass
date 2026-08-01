@@ -38,6 +38,46 @@ struct PathMetadata {
     icon_data_url: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WorkArea {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RestoredWindowPosition {
+    x: i32,
+    y: i32,
+    reset: bool,
+}
+
+fn restore_target(x: i32, y: i32, width: u32, height: u32, candidate: Option<WorkArea>, primary: WorkArea) -> RestoredWindowPosition {
+    let fits = candidate.is_some_and(|area| {
+        let right = i64::from(x) + i64::from(width);
+        let bottom = i64::from(y) + i64::from(height);
+        i64::from(x) >= i64::from(area.left)
+            && i64::from(y) >= i64::from(area.top)
+            && right <= i64::from(area.right)
+            && bottom <= i64::from(area.bottom)
+    });
+    if fits {
+        return RestoredWindowPosition { x, y, reset: false };
+    }
+
+    let work_width = i64::from(primary.right) - i64::from(primary.left);
+    let work_height = i64::from(primary.bottom) - i64::from(primary.top);
+    let centered_x = i64::from(primary.left) + (work_width - i64::from(width)).max(0) / 2;
+    let centered_y = i64::from(primary.top) + (work_height - i64::from(height)).max(0) / 2;
+    RestoredWindowPosition {
+        x: centered_x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        y: centered_y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        reset: true,
+    }
+}
+
 fn addr() -> SocketAddrV4 { SocketAddrV4::new(Ipv4Addr::LOCALHOST, INSTANCE_PORT) }
 fn ping_existing() -> bool {
     let Ok(mut stream) = TcpStream::connect_timeout(&addr().into(), Duration::from_millis(250)) else { return false };
@@ -60,15 +100,12 @@ fn set_ball_anchor(x: i32, y: i32) {
 }
 
 #[tauri::command]
-fn restore_ball_position(app: tauri::AppHandle, x: i32, y: i32) -> Result<(), String> {
+fn restore_ball_position(app: tauri::AppHandle, x: i32, y: i32) -> Result<RestoredWindowPosition, String> {
     let win = app.get_webview_window("main").ok_or("主窗口不存在")?;
     let size = win.outer_size().map_err(|e| e.to_string())?;
-    let center_x = x + size.width as i32 / 2;
-    let center_y = y + size.height as i32 / 2;
-    let (left, top, right, bottom) = monitor_work_area(center_x, center_y);
-    let target_x = x.clamp(left, (right - size.width as i32).max(left));
-    let target_y = y.clamp(top, (bottom - size.height as i32).max(top));
-    win.set_position(PhysicalPosition::new(target_x, target_y)).map_err(|e| e.to_string())
+    let target = restore_target(x, y, size.width, size.height, monitor_work_area_for_rect(x, y, size.width, size.height), primary_monitor_work_area());
+    win.set_position(PhysicalPosition::new(target.x, target.y)).map_err(|e| e.to_string())?;
+    Ok(target)
 }
 
 #[tauri::command]
@@ -284,8 +321,83 @@ fn monitor_work_area(x: i32, y: i32) -> (i32, i32, i32, i32) {
     (0, 0, 1920, 1080)
 }
 
+#[cfg(target_os = "windows")]
+fn monitor_work_area_for_rect(x: i32, y: i32, width: u32, height: u32) -> Option<WorkArea> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromRect, MONITORINFO, MONITOR_DEFAULTTONULL};
+    let width = i32::try_from(width).unwrap_or(i32::MAX);
+    let height = i32::try_from(height).unwrap_or(i32::MAX);
+    let rect = RECT { left: x, top: y, right: x.saturating_add(width), bottom: y.saturating_add(height) };
+    unsafe {
+        let monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONULL);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, rcMonitor: std::mem::zeroed(), rcWork: std::mem::zeroed(), dwFlags: 0 };
+        if monitor != std::ptr::null_mut() && GetMonitorInfoW(monitor, &mut info) != 0 {
+            return Some(WorkArea { left: info.rcWork.left, top: info.rcWork.top, right: info.rcWork.right, bottom: info.rcWork.bottom });
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn primary_monitor_work_area() -> WorkArea {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY};
+    unsafe {
+        let monitor = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, rcMonitor: std::mem::zeroed(), rcWork: std::mem::zeroed(), dwFlags: 0 };
+        if monitor != std::ptr::null_mut() && GetMonitorInfoW(monitor, &mut info) != 0 {
+            return WorkArea { left: info.rcWork.left, top: info.rcWork.top, right: info.rcWork.right, bottom: info.rcWork.bottom };
+        }
+    }
+    WorkArea { left: 0, top: 0, right: 1920, bottom: 1080 }
+}
+
 #[cfg(not(target_os = "windows"))]
 fn monitor_work_area(_x: i32, _y: i32) -> (i32, i32, i32, i32) { (0, 0, 1920, 1080) }
+
+#[cfg(not(target_os = "windows"))]
+fn monitor_work_area_for_rect(_x: i32, _y: i32, _width: u32, _height: u32) -> Option<WorkArea> { Some(primary_monitor_work_area()) }
+
+#[cfg(not(target_os = "windows"))]
+fn primary_monitor_work_area() -> WorkArea { WorkArea { left: 0, top: 0, right: 1920, bottom: 1080 } }
+
+#[cfg(test)]
+mod position_tests {
+    use super::{restore_target, WorkArea};
+
+    const PRIMARY: WorkArea = WorkArea { left: 0, top: 0, right: 1920, bottom: 1040 };
+
+    #[test]
+    fn keeps_a_valid_position() {
+        let result = restore_target(100, 200, 88, 88, Some(PRIMARY), PRIMARY);
+        assert_eq!((result.x, result.y, result.reset), (100, 200, false));
+    }
+
+    #[test]
+    fn centers_a_position_outside_every_screen() {
+        let result = restore_target(4000, 3000, 88, 88, None, PRIMARY);
+        assert_eq!((result.x, result.y, result.reset), (916, 476, true));
+    }
+
+    #[test]
+    fn centers_a_position_overlapping_the_taskbar() {
+        let result = restore_target(100, 1000, 88, 88, Some(PRIMARY), PRIMARY);
+        assert_eq!((result.x, result.y, result.reset), (916, 476, true));
+    }
+
+    #[test]
+    fn accepts_a_valid_negative_coordinate_monitor() {
+        let secondary = WorkArea { left: -1280, top: 0, right: 0, bottom: 984 };
+        let result = restore_target(-1200, 100, 88, 88, Some(secondary), PRIMARY);
+        assert_eq!((result.x, result.y, result.reset), (-1200, 100, false));
+    }
+
+    #[test]
+    fn extreme_coordinates_do_not_overflow() {
+        let result = restore_target(i32::MAX, i32::MIN, u32::MAX, u32::MAX, None, PRIMARY);
+        assert_eq!((result.x, result.y, result.reset), (0, 0, true));
+    }
+}
 
 #[tauri::command]
 fn system_accent() -> String {
