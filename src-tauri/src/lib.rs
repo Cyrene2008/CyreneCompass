@@ -100,7 +100,9 @@ async fn check_update() -> Result<serde_json::Value, String> {
 
 fn update_installer_path(file_name: &str) -> Result<PathBuf, String> {
     let safe_name = Path::new(file_name).file_name().and_then(|value| value.to_str()).ok_or("安装包文件名无效")?;
-    if safe_name != file_name || !safe_name.starts_with("CyreneCompass_") || !safe_name.ends_with("_x64-setup.exe") {
+    let official_name = safe_name.starts_with("CyreneCompass_")
+        && (safe_name.ends_with("_x64-setup.exe") || safe_name.ends_with("_x64-standard-setup.exe"));
+    if safe_name != file_name || !official_name {
         return Err("安装包文件名不属于 CyreneCompass 官方格式".into());
     }
     let directory = std::env::temp_dir().join("CyreneCompass").join("updates");

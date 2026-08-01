@@ -55,7 +55,7 @@
             <h1>{{ t('about') }}</h1>
             <div class="about-hero">
               <img src="/cyrene.png" alt="Cyrene" />
-              <div><h2>Cyreneの罗盘</h2><p>{{ t('aboutLead') }}</p><p class="muted">{{ t('version') }} {{ version }}</p></div>
+              <div><h2>Cyreneの罗盘</h2><p>{{ t('aboutLead') }}</p><p class="muted">{{ t('version') }} {{ version }} · {{ t(BUILD_VARIANT === 'uiaccess' ? 'uiAccessEdition' : 'standardEdition') }}</p></div>
             </div>
             <div class="about-details">
               <div><span>{{ t('author') }}</span><strong>Cyrene2008 (星海昔涟)</strong></div>
@@ -101,7 +101,7 @@ import FluentSwitch from './components/FluentSwitch.vue'
 import FluentNumberInput from './components/FluentNumberInput.vue'
 import NumberField from './components/SettingNumberField.vue'
 import { clientOffsetToPhysical, createPointerMoveState, exceedsDragThreshold, mouseDragTarget, touchDragTarget } from './utils/physicalDrag'
-import { CURRENT_VERSION, checkForUpdates, downloadUpdate, updateState } from './updater'
+import { BUILD_VARIANT, CURRENT_VERSION, checkForUpdates, downloadUpdate, updateState } from './updater'
 
 addCollection(fluentIcons)
 const version = CURRENT_VERSION; const mode = ref('ball'); const section = ref('general'); const breadcrumb = ref([]); const editBreadcrumb = ref([]); const toast = ref(''); const gridRef = ref(); const shellRef = ref(); const iconPickerItem = ref(null); const iconSearch = ref(''); const exitStage = ref(0); const systemAccent = ref('#0078d4'); let idleTimer; let ballPointer; let centerPointer; let titlebarPointer; let transitioning = false; const cleanups = []
