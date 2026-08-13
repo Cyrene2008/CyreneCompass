@@ -36,18 +36,18 @@ Cyreneの罗盘是面向 Windows 10/11 与触屏一体机的 Fluent 风格快捷
 坐标换算与移动队列回归测试：
 
 ```powershell
-npm test
+bun test
 ```
 
 ```powershell
-npm install
-npm run tauri:dev
+bun install
+bun run tauri:dev
 ```
 
 只预览前端：
 
 ```powershell
-npm run dev
+bun run dev
 ```
 
 ## 构建
@@ -55,7 +55,7 @@ npm run dev
 构建 Windows x64 安装包：
 
 ```powershell
-npm run tauri:build
+bun run tauri:build
 ```
 
 安装包输出为：
