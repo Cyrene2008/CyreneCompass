@@ -5,7 +5,7 @@ use std::process::Command;
 use std::fs;
 use serde::{Deserialize, Serialize};
 use base64::Engine;
-use std::sync::{Mutex, atomic::{AtomicBool, Ordering}};
+use std::sync::{Mutex, atomic::{AtomicBool, AtomicIsize, Ordering}};
 use std::thread;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
@@ -16,6 +16,7 @@ const INSTANCE_PORT: u16 = 47682;
 const INSTANCE_PING: &[u8] = b"CYRENE_COMPASS_SHOW\n";
 const INSTANCE_ACK: &[u8] = b"CYRENE_COMPASS_ACK\n";
 static READY: AtomicBool = AtomicBool::new(false);
+static TOPMOST_HWND: AtomicIsize = AtomicIsize::new(0);
 static BALL_ANCHOR: Mutex<Option<(i32, i32)>> = Mutex::new(None);
 const UPDATE_URL_PREFIX: &str = "https://github.com/Cyrene2008/CyreneCompass/releases/download/";
 const UPDATE_MIN_INSTALLER_SIZE: usize = 1024 * 1024;
@@ -78,6 +79,16 @@ fn restore_target(x: i32, y: i32, width: u32, height: u32, candidate: Option<Wor
     }
 }
 
+fn clamp_target(x: i32, y: i32, width: u32, height: u32, area: WorkArea) -> RestoredWindowPosition {
+    let max_x = (i64::from(area.right) - i64::from(width)).max(i64::from(area.left));
+    let max_y = (i64::from(area.bottom) - i64::from(height)).max(i64::from(area.top));
+    RestoredWindowPosition {
+        x: i64::from(x).clamp(i64::from(area.left), max_x) as i32,
+        y: i64::from(y).clamp(i64::from(area.top), max_y) as i32,
+        reset: false,
+    }
+}
+
 fn addr() -> SocketAddrV4 { SocketAddrV4::new(Ipv4Addr::LOCALHOST, INSTANCE_PORT) }
 fn ping_existing() -> bool {
     let Ok(mut stream) = TcpStream::connect_timeout(&addr().into(), Duration::from_millis(250)) else { return false };
@@ -104,6 +115,21 @@ fn restore_ball_position(app: tauri::AppHandle, x: i32, y: i32) -> Result<Restor
     let win = app.get_webview_window("main").ok_or("主窗口不存在")?;
     let size = win.outer_size().map_err(|e| e.to_string())?;
     let target = restore_target(x, y, size.width, size.height, monitor_work_area_for_rect(x, y, size.width, size.height), primary_monitor_work_area());
+    win.set_position(PhysicalPosition::new(target.x, target.y)).map_err(|e| e.to_string())?;
+    Ok(target)
+}
+
+#[tauri::command]
+fn move_window_clamped(app: tauri::AppHandle, x: i32, y: i32) -> Result<RestoredWindowPosition, String> {
+    let win = app.get_webview_window("main").ok_or("主窗口不存在")?;
+    let size = win.outer_size().map_err(|e| e.to_string())?;
+    let center_x = i64::from(x) + i64::from(size.width) / 2;
+    let center_y = i64::from(y) + i64::from(size.height) / 2;
+    let (left, top, right, bottom) = monitor_bounds(
+        center_x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        center_y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+    );
+    let target = clamp_target(x, y, size.width, size.height, WorkArea { left, top, right, bottom });
     win.set_position(PhysicalPosition::new(target.x, target.y)).map_err(|e| e.to_string())?;
     Ok(target)
 }
@@ -321,6 +347,20 @@ fn monitor_work_area(x: i32, y: i32) -> (i32, i32, i32, i32) {
 }
 
 #[cfg(target_os = "windows")]
+fn monitor_bounds(x: i32, y: i32) -> (i32, i32, i32, i32) {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    unsafe {
+        let monitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
+        let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, rcMonitor: std::mem::zeroed(), rcWork: std::mem::zeroed(), dwFlags: 0 };
+        if monitor != std::ptr::null_mut() && GetMonitorInfoW(monitor, &mut info) != 0 {
+            return (info.rcMonitor.left, info.rcMonitor.top, info.rcMonitor.right, info.rcMonitor.bottom);
+        }
+    }
+    (0, 0, 1920, 1080)
+}
+
+#[cfg(target_os = "windows")]
 fn monitor_work_area_for_rect(x: i32, y: i32, width: u32, height: u32) -> Option<WorkArea> {
     use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromRect, MONITORINFO, MONITOR_DEFAULTTONULL};
@@ -355,6 +395,9 @@ fn primary_monitor_work_area() -> WorkArea {
 fn monitor_work_area(_x: i32, _y: i32) -> (i32, i32, i32, i32) { (0, 0, 1920, 1080) }
 
 #[cfg(not(target_os = "windows"))]
+fn monitor_bounds(_x: i32, _y: i32) -> (i32, i32, i32, i32) { (0, 0, 1920, 1080) }
+
+#[cfg(not(target_os = "windows"))]
 fn monitor_work_area_for_rect(_x: i32, _y: i32, _width: u32, _height: u32) -> Option<WorkArea> { Some(primary_monitor_work_area()) }
 
 #[cfg(not(target_os = "windows"))]
@@ -362,9 +405,10 @@ fn primary_monitor_work_area() -> WorkArea { WorkArea { left: 0, top: 0, right: 
 
 #[cfg(test)]
 mod position_tests {
-    use super::{restore_target, WorkArea};
+    use super::{clamp_target, restore_target, WorkArea};
 
     const PRIMARY: WorkArea = WorkArea { left: 0, top: 0, right: 1920, bottom: 1040 };
+    const DISPLAY: WorkArea = WorkArea { left: 0, top: 0, right: 1920, bottom: 1080 };
 
     #[test]
     fn keeps_a_valid_position() {
@@ -389,6 +433,21 @@ mod position_tests {
         let secondary = WorkArea { left: -1280, top: 0, right: 0, bottom: 984 };
         let result = restore_target(-1200, 100, 88, 88, Some(secondary), PRIMARY);
         assert_eq!((result.x, result.y, result.reset), (-1200, 100, false));
+    }
+
+
+    #[test]
+    fn clamps_dragged_windows_inside_the_work_area() {
+        let left = clamp_target(-40, 100, 88, 88, PRIMARY);
+        let bottom = clamp_target(1900, 1030, 88, 88, PRIMARY);
+        assert_eq!((left.x, left.y), (0, 100));
+        assert_eq!((bottom.x, bottom.y), (1832, 952));
+    }
+
+    #[test]
+    fn allows_dragging_over_the_taskbar_area() {
+        let target = clamp_target(1900, 1060, 88, 88, DISPLAY);
+        assert_eq!((target.x, target.y), (1832, 992));
     }
 
     #[test]
@@ -426,6 +485,7 @@ fn inspect_path(path: String) -> Result<PathMetadata, String> {
     #[cfg(target_os = "windows")]
     {
         let script = r#"
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $p = [Environment]::GetEnvironmentVariable('CYRENE_INSPECT_PATH')
 $item = Get-Item -LiteralPath $p -ErrorAction Stop
 $target = $p
@@ -586,6 +646,44 @@ fn set_no_activate(hwnd: windows_sys::Win32::Foundation::HWND, enabled: bool) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn raise_topmost(hwnd: windows_sys::Win32::Foundation::HWND) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE};
+    unsafe { SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); }
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn foreground_changed(
+    _hook: windows_sys::Win32::UI::Accessibility::HWINEVENTHOOK,
+    _event: u32,
+    _foreground: windows_sys::Win32::Foundation::HWND,
+    _object_id: i32,
+    _child_id: i32,
+    _thread_id: u32,
+    _event_time: u32,
+) {
+    let hwnd = TOPMOST_HWND.load(Ordering::Relaxed) as windows_sys::Win32::Foundation::HWND;
+    if !hwnd.is_null() { raise_topmost(hwnd); }
+}
+
+#[cfg(target_os = "windows")]
+fn watch_foreground_changes(hwnd: windows_sys::Win32::Foundation::HWND) {
+    use windows_sys::Win32::UI::Accessibility::SetWinEventHook;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{EVENT_SYSTEM_FOREGROUND, WINEVENT_OUTOFCONTEXT};
+    TOPMOST_HWND.store(hwnd as isize, Ordering::Relaxed);
+    unsafe {
+        SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_FOREGROUND,
+            std::ptr::null_mut(),
+            Some(foreground_changed),
+            0,
+            0,
+            WINEVENT_OUTOFCONTEXT,
+        );
+    }
+}
+
 fn create_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let settings = MenuItem::with_id(app, "settings", "打开设置", true, None::<&str>)?; let menu = Menu::with_items(app, &[&settings])?;
     TrayIconBuilder::with_id("compass-tray").icon(app.default_window_icon().cloned().unwrap()).tooltip("Cyreneの罗盘").menu(&menu).show_menu_on_left_click(false).on_tray_icon_event(|tray, event| { if let tauri::tray::TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, button_state: tauri::tray::MouseButtonState::Up, .. } = event { let _ = tray.app_handle().emit("compass-show-requested", ()); } }).on_menu_event(|app, event| { if event.id.as_ref() == "settings" { let _ = app.emit("compass-settings-requested", ()); } }).build(app)?; Ok(())
@@ -606,8 +704,11 @@ pub fn run() {
         create_tray(app)?;
         #[cfg(target_os = "windows")]
         if let Some(window) = app.get_webview_window("main") {
-            if let Ok(hwnd) = window.hwnd() { set_no_activate(hwnd.0, true); }
+            if let Ok(hwnd) = window.hwnd() {
+                set_no_activate(hwnd.0, true);
+                watch_foreground_changes(hwnd.0);
+            }
         }
         Ok(())
-    }).invoke_handler(tauri::generate_handler![main_window_ready, set_ball_anchor, restore_ball_position, set_window_mode, system_accent, inspect_path, read_visual_data_url, execute_action, configure_startup, check_update, download_and_launch_update, open_external, quit_app]).run(tauri::generate_context!()).expect("error while running Cyrene Compass");
+    }).invoke_handler(tauri::generate_handler![main_window_ready, set_ball_anchor, restore_ball_position, move_window_clamped, set_window_mode, system_accent, inspect_path, read_visual_data_url, execute_action, configure_startup, check_update, download_and_launch_update, open_external, quit_app]).run(tauri::generate_context!()).expect("error while running Cyrene Compass");
 }

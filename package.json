@@ -21,7 +21,9 @@
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "gsap": "^3.13.0",
     "pinia": "^3.0.3",
-    "vue": "^3.5.17"
+    "vue": "^3.5.17",
+    "vue-fluent-widgets": "^1.0.1",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
