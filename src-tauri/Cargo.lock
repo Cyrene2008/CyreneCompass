@@ -491,7 +491,7 @@ checksum = "52560adf09603e58c9a7ee1fe1dcb95a16927b17c127f0ac02d6e768a0e25bc1"
 
 [[package]]
 name = "cyrene-compass"
-version = "26.0.0"
+version = "26.0.1"
 dependencies = [
  "base64 0.22.1",
  "reqwest 0.12.28",

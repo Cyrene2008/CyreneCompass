@@ -1,7 +1,7 @@
-import { mkdir, readdir, rename, rm } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-const version = '26.0.0'
+const { version } = JSON.parse(await readFile(resolve('src-tauri/tauri.conf.json'), 'utf8'))
 const directory = resolve('src-tauri/target/release/bundle/nsis')
 const outputName = `CyreneCompass_${version}_x64-setup.exe`
 const destination = resolve(directory, outputName)
