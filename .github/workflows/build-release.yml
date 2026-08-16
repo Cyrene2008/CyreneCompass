@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    name: Build Windows x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - run: bun install --frozen-lockfile --registry=https://registry.npmjs.org/
+      - run: bun run tauri:build
+        env:
+          CI: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-win32
+          path: src-tauri/target/release/bundle/nsis/
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets/
+          merge-multiple: true
+      - name: Extract version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(node -e 'process.stdout.write(require("./src-tauri/tauri.conf.json").version)')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Generate changelog
+        id: changelog
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          PREV=$(git tag --sort=-version:refname | grep -v "^$TAG$" | head -1 || true)
+          if [ -z "$PREV" ]; then PREV=$(git rev-list --max-parents=0 HEAD); fi
+          {
+            echo "## Past release $(date +%Y-%m-%d)"
+            echo ""
+            git log --pretty='- %s' --no-merges "$PREV..HEAD"
+          } > changelog.txt
+          cat changelog.txt
+      - name: Publish release
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          cd assets
+          ASSETS=$(ls -1 | tr '\n' ' ')
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "==> Release $TAG exists, updating assets and appending changelog"
+            gh release upload "$TAG" $ASSETS --clobber
+            gh release edit "$TAG" --notes-file ../changelog.txt
+          else
+            echo "==> Creating release $TAG"
+            gh release create "$TAG" $ASSETS --title "Cyreneの罗盘 v${{ steps.version.outputs.version }}" --notes-file ../changelog.txt
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
