@@ -27,3 +27,4 @@ Desktop.ini
 /.idea/
 /.vscode/
 .DS_Store
+/.bun-tmp
