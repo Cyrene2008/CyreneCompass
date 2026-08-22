@@ -2,7 +2,7 @@
   "packageManager": "bun@1.3.14",
   
   "name": "cyrene-compass",
-  "version": "26.0.1",
+  "version": "26.0.2",
   "description": "Cyreneの罗盘 - Fluent quick launcher for Windows",
   "private": true,
   "type": "module",
