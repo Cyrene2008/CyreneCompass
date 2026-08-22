@@ -205,14 +205,16 @@ fn update_installer_path(file_name: &str) -> Result<PathBuf, String> {
 async fn download_update_bytes(app: &tauri::AppHandle, url: &str, expected_size: u64) -> Result<Vec<u8>, String> {
     if !url.starts_with(UPDATE_URL_PREFIX) { return Err("更新地址不属于 CyreneCompass 官方发布源".into()); }
     let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(300))
+        .connect_timeout(Duration::from_secs(6))
+        .timeout(Duration::from_secs(120))
         .build()
         .map_err(|error| error.to_string())?;
     let candidates = [
         url.to_string(),
         format!("https://gh-proxy.com/{}", url),
         format!("https://gh.昔涟.cn/{}", url),
+        format!("https://ghproxy.net/{}", url),
+        format!("https://ghfast.top/{}", url),
     ];
     let mut failures = Vec::new();
     for candidate in candidates {
