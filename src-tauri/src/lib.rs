@@ -103,7 +103,37 @@ fn start_instance_listener(app: tauri::AppHandle, listener: TcpListener) {
 }
 
 #[tauri::command]
-async fn main_window_ready() -> Result<(), String> { READY.store(true, Ordering::Release); Ok(()) }
+fn main_window_ready() -> Result<(), String> { READY.store(true, Ordering::Release); Ok(()) }
+
+fn installation_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|dir| dir.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn config_dir() -> PathBuf { installation_dir().join("data") }
+
+fn config_path() -> PathBuf { config_dir().join("cyrene-compass.json") }
+
+#[tauri::command]
+fn load_settings() -> Result<Option<serde_json::Value>, String> {
+    let path = config_path();
+    match fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str(&content).map(Some).map_err(|error| format!("配置文件解析错误：{error}")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("无法读取配置文件：{error}")),
+    }
+}
+
+#[tauri::command]
+fn save_settings(value: serde_json::Value) -> Result<(), String> {
+    let path = config_path();
+    fs::create_dir_all(path.parent().ok_or("无效的配置目录")?).map_err(|error| format!("无法创建配置目录：{error}"))?;
+    let content = serde_json::to_string_pretty(&value).map_err(|error| format!("配置文件序列化失败：{error}"))?;
+    fs::write(&path, content).map_err(|error| format!("无法写入配置文件：{error}"))?;
+    Ok(())
+}
 
 #[tauri::command]
 fn set_ball_anchor(x: i32, y: i32) {
@@ -273,7 +303,7 @@ fn open_external(url: String) -> Result<(), String> {
 #[tauri::command]
 async fn set_window_mode(app: tauri::AppHandle, mode: String, opacity: f64, width: Option<f64>, height: Option<f64>, animate: Option<bool>) -> Result<(), String> {
     let win = app.get_webview_window("main").ok_or("主窗口不存在")?;
-    let (default_w, default_h) = match mode.as_str() { "compass" => (560.0, 630.0), "settings" => (1120.0, 760.0), _ => (88.0, 88.0) };
+    let (default_w, default_h) = match mode.as_str() { "compass" => (560.0, 630.0), "settings" => (1460.0, 760.0), _ => (88.0, 88.0) };
     let w = width.unwrap_or(default_w).max(44.0);
     let h = height.unwrap_or(default_h).max(44.0);
     let old_size = win.outer_size().map_err(|e| e.to_string())?;
@@ -554,6 +584,157 @@ fn read_visual_data_url(path: String) -> Result<String, String> {
     Ok(format!("data:{};base64,{}", mime, base64::engine::general_purpose::STANDARD.encode(bytes)))
 }
 
+#[cfg(target_os = "windows")]
+fn shell_open_file(target: &str) -> Result<(), i32> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide = |value: &std::ffi::OsStr| value.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+    let verb = wide(std::ffi::OsStr::new("open"));
+    let file = wide(std::ffi::OsStr::new(target));
+    let result = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) } as isize;
+    if result <= 32 { Err(result as i32) } else { Ok(()) }
+}
+
+#[cfg(target_os = "windows")]
+fn shell_runas(file: &str, params: &str) -> Result<(), i32> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide = |value: &std::ffi::OsStr| value.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+    let verb = wide(std::ffi::OsStr::new("runas"));
+    let f = wide(std::ffi::OsStr::new(file));
+    let p = wide(std::ffi::OsStr::new(params));
+    let result = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), f.as_ptr(), p.as_ptr(), std::ptr::null(), SW_SHOWNORMAL) } as isize;
+    if result <= 32 { Err(result as i32) } else { Ok(()) }
+}
+
+#[cfg(target_os = "windows")]
+fn expand_env_vars(input: &str) -> String {
+    let mut output = String::new();
+    let mut rest = input;
+    while let Some(start) = rest.find('%') {
+        output.push_str(&rest[..start]);
+        let tail = &rest[start + 1..];
+        let Some((name, after)) = tail.split_once('%').filter(|(name, _)| !name.is_empty()) else {
+            output.push('%');
+            rest = tail;
+            continue;
+        };
+        match std::env::var(name) {
+            Ok(value) => output.push_str(&value),
+            Err(_) => { output.push('%'); output.push_str(name); output.push('%'); }
+        }
+        rest = after;
+    }
+    output.push_str(rest);
+    output
+}
+
+#[cfg(target_os = "windows")]
+fn split_command_line(input: &str) -> (String, Vec<String>) {
+    let expanded = expand_env_vars(input.trim());
+    let mut program = String::new();
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut in_program = true;
+    let mut quoted = false;
+    for c in expanded.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            ' ' | '\t' if !quoted => {
+                if in_program {
+                    if !current.is_empty() { program = std::mem::take(&mut current); in_program = false; }
+                } else if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            _ => current.push(c),
+        }
+    }
+    if in_program { program = current } else if !current.is_empty() { args.push(current); }
+    (program, args)
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_program(program: &str) -> Option<PathBuf> {
+    let candidate = PathBuf::from(program);
+    if candidate.is_file() { return Some(candidate); }
+    if program.contains('/') || program.contains('\\') { return None; }
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Ok(current) = std::env::current_dir() { dirs.push(current); }
+    if let Ok(path) = std::env::var("PATH") {
+        dirs.extend(path.split(';').filter(|entry| !entry.is_empty()).map(PathBuf::from));
+    }
+    if let Ok(root) = std::env::var("SystemRoot") {
+        dirs.push(PathBuf::from(&root).join("System32"));
+        dirs.push(PathBuf::from(&root));
+    }
+    for dir in dirs {
+        let base = dir.join(program);
+        if base.is_file() { return Some(base.clone()); }
+        for ext in ["exe", "com"] {
+            let with_ext = base.with_extension(ext);
+            if with_ext.is_file() { return Some(with_ext); }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn run_command_line(target: &str) -> Result<(), String> {
+    let expanded = expand_env_vars(target);
+    let expanded = expanded.trim();
+    if expanded.is_empty() { return Ok(()); }
+    let (program, args) = split_command_line(expanded);
+    if program.is_empty() { return Err("无法解析命令".into()); }
+    let ext = Path::new(&program).extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    if ext == "bat" || ext == "cmd" {
+        hidden_command("cmd.exe").args(["/S", "/C", expanded]).spawn().map_err(|e| format!("无法运行命令行：{}", e))?;
+        return Ok(());
+    }
+    if ext == "ps1" {
+        let spawn_ps1 = |exe: &str| {
+            let mut command = hidden_command(exe);
+            command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", &program]);
+            command.args(&args);
+            command.spawn()
+        };
+        spawn_ps1("pwsh.exe").or_else(|_| spawn_ps1("powershell.exe")).map_err(|e| format!("无法运行 PowerShell 脚本：{}", e))?;
+        return Ok(());
+    }
+    let resolved = resolve_program(&program);
+    let spawned = match &resolved {
+        Some(path) => hidden_command(&path.to_string_lossy()).args(&args).spawn(),
+        None => hidden_command(&program).args(&args).spawn(),
+    };
+    spawned.map_err(|e| format!("无法运行程序 {program}：{e}"))?;
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn run_command_elevated(target: &str) -> Result<(), String> {
+    let trimmed = target.trim();
+    let unquoted = trimmed.trim_matches('"');
+    let ext = Path::new(unquoted).extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    if Path::new(unquoted).is_file() {
+        if ext == "bat" || ext == "cmd" {
+            let line = format!("/S /C \"{}\"", unquoted.replace('"', "\"\""));
+            return shell_runas("cmd.exe", &line).map_err(|r| format!("管理员启动失败：{}", r));
+        }
+        if ext == "ps1" {
+            let exe = if resolve_program("pwsh.exe").is_some() { "pwsh.exe" } else { "powershell.exe" };
+            let line = format!("-NoProfile -ExecutionPolicy Bypass -File \"{}\"", unquoted);
+            return shell_runas(exe, &line).map_err(|r| format!("管理员启动失败：{}", r));
+        }
+        return shell_runas(unquoted, "").map_err(|r| format!("管理员启动失败：{}", r));
+    }
+    let (program, args) = split_command_line(trimmed);
+    if program.is_empty() { return Err("无法解析命令".into()); }
+    let resolved = resolve_program(&program).ok_or_else(|| format!("找不到程序 {program}，管理员模式需要完整路径"))?;
+    shell_runas(&resolved.to_string_lossy(), &args.join(" ")).map_err(|r| format!("管理员启动失败：{}", r))
+}
+
 #[tauri::command]
 async fn execute_action(target: String, elevated: bool, script: bool) -> Result<(), String> {
     if target.trim().is_empty() { return Ok(()) }
@@ -569,27 +750,52 @@ async fn execute_action(target: String, elevated: bool, script: bool) -> Result<
             let result = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), args.as_ptr(), std::ptr::null(), SW_HIDE) } as isize;
             if result <= 32 { return Err(format!("管理员 PowerShell 启动失败：{}", result)); }
         } else if script {
-            hidden_command("pwsh.exe").args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &target]).spawn().map_err(|e| e.to_string())?;
+            let run_script = |program: &str| {
+                let mut command = hidden_command(program);
+                command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &target]);
+                command.spawn()
+            };
+            run_script("pwsh.exe").or_else(|_| run_script("powershell.exe")).map_err(|e| format!("无法运行 PowerShell 脚本：{}", e))?;
         } else if elevated {
-            use std::os::windows::ffi::OsStrExt;
-            use windows_sys::Win32::UI::Shell::ShellExecuteW;
-            use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-            let file: Vec<u16> = std::ffi::OsStr::new(&target).encode_wide().chain(Some(0)).collect(); let verb: Vec<u16> = std::ffi::OsStr::new("runas").encode_wide().chain(Some(0)).collect();
-            let result = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) } as isize; if result <= 32 { return Err(format!("管理员启动失败：{}", result)) }
-        } else {
-            use std::os::windows::ffi::OsStrExt;
-            use windows_sys::Win32::UI::Shell::ShellExecuteW;
-            use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-            let wide = |value: &std::ffi::OsStr| value.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
-            let verb = wide(std::ffi::OsStr::new("open"));
-            let file = wide(std::ffi::OsStr::new(&target));
-            let result = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) } as isize;
-            if result <= 32 { return Err(format!("无法打开文件或 URI：{}", result)); }
+            run_command_elevated(&target)?;
+        } else if let Err(shell_error) = shell_open_file(&target) {
+            run_command_line(&target).map_err(|command_error| format!("无法打开文件或 URI：{}；按命令行执行也失败：{}", shell_error, command_error))?;
         }
         return Ok(())
     }
     #[cfg(not(target_os = "windows"))]
     { Command::new("sh").args(["-c", &target]).spawn().map_err(|e| e.to_string())?; Ok(()) }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod command_tests {
+    use super::{expand_env_vars, resolve_program, split_command_line};
+
+    #[test]
+    fn splits_bare_command() {
+        let (program, args) = split_command_line("shutdown -s -t 0");
+        assert_eq!(program, "shutdown");
+        assert_eq!(args, vec!["-s", "-t", "0"]);
+    }
+
+    #[test]
+    fn splits_quoted_program_with_spaces() {
+        let (program, args) = split_command_line(r#""C:\Program Files\App\run.exe" --fast"#);
+        assert_eq!(program, r"C:\Program Files\App\run.exe");
+        assert_eq!(args, vec!["--fast"]);
+    }
+
+    #[test]
+    fn expands_percent_env_vars() {
+        assert_eq!(expand_env_vars("%SystemRoot%\\System32\\shutdown.exe"), r"C:\Windows\System32\shutdown.exe");
+    }
+
+    #[test]
+    fn resolves_known_system_programs() {
+        assert!(resolve_program("shutdown").is_some());
+        assert!(resolve_program("notepad.exe").is_some());
+        assert!(resolve_program("definitely-not-exists-cyrene-xyz").is_none());
+    }
 }
 
 #[tauri::command]
@@ -703,12 +909,30 @@ pub fn run() {
         start_instance_listener(app.handle().clone(), listener);
         create_tray(app)?;
         #[cfg(target_os = "windows")]
+        {
+            use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetPriorityClass, HIGH_PRIORITY_CLASS};
+            unsafe { SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS); }
+        }
+        #[cfg(target_os = "windows")]
         if let Some(window) = app.get_webview_window("main") {
             if let Ok(hwnd) = window.hwnd() {
                 set_no_activate(hwnd.0, true);
                 watch_foreground_changes(hwnd.0);
+                let handle = hwnd.0 as isize;
+                thread::spawn(move || {
+                    let hwnd_handle = handle as windows_sys::Win32::Foundation::HWND;
+                    for _ in 0..24 {
+                        if READY.load(Ordering::Acquire) { break; }
+                        unsafe {
+                            use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNA};
+                            ShowWindow(hwnd_handle, SW_SHOWNA);
+                        }
+                        raise_topmost(hwnd_handle);
+                        thread::sleep(Duration::from_millis(400));
+                    }
+                });
             }
         }
         Ok(())
-    }).invoke_handler(tauri::generate_handler![main_window_ready, set_ball_anchor, restore_ball_position, move_window_clamped, set_window_mode, system_accent, inspect_path, read_visual_data_url, execute_action, configure_startup, check_update, download_and_launch_update, open_external, quit_app]).run(tauri::generate_context!()).expect("error while running Cyrene Compass");
+    }).invoke_handler(tauri::generate_handler![main_window_ready, set_ball_anchor, restore_ball_position, move_window_clamped, set_window_mode, system_accent, inspect_path, read_visual_data_url, execute_action, configure_startup, check_update, download_and_launch_update, open_external, quit_app, load_settings, save_settings]).run(tauri::generate_context!()).expect("error while running Cyrene Compass");
 }

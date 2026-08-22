@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
-export const CURRENT_VERSION = '26.0.1'
+export const CURRENT_VERSION = '26.0.2'
 
 export const updateState = ref({
   checked: false,
