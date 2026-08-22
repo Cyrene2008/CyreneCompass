@@ -211,18 +211,19 @@ async fn download_update_bytes(app: &tauri::AppHandle, url: &str, expected_size:
         .map_err(|error| error.to_string())?;
     let candidates = [
         url.to_string(),
-        format!("https://gh-proxy.com/{}", url),
+        format!("https://v4.gh-proxy.com/{}", url),
         format!("https://gh.昔涟.cn/{}", url),
         format!("https://ghproxy.net/{}", url),
         format!("https://ghfast.top/{}", url),
     ];
+    let display_url = |value: &str| value.replace("https://v4.gh-proxy.com/", "https://gh-proxy.com/");
     let mut failures = Vec::new();
     for candidate in candidates {
         match client.get(&candidate).header("User-Agent", "CyreneCompass").header("Accept", "application/octet-stream").send().await {
             Ok(mut response) if response.status().is_success() => {
                 let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("").to_ascii_lowercase();
                 if content_type.contains("text/html") || content_type.contains("application/json") {
-                    failures.push(format!("{} 返回了非安装程序内容", candidate));
+                    failures.push(format!("{} 返回了非安装程序内容", display_url(&candidate)));
                     continue;
                 }
                 let total = if expected_size > 0 { expected_size } else { response.content_length().unwrap_or(0) };
@@ -239,7 +240,7 @@ async fn download_update_bytes(app: &tauri::AppHandle, url: &str, expected_size:
                             }
                         }
                         Ok(None) => break,
-                        Err(error) => { failures.push(format!("{} 下载中断：{}", candidate, error)); bytes.clear(); break; }
+                        Err(error) => { failures.push(format!("{} 下载中断：{}", display_url(&candidate), error)); bytes.clear(); break; }
                     }
                 }
                 if bytes.len() < UPDATE_MIN_INSTALLER_SIZE { failures.push(format!("{} 安装包体积异常", candidate)); continue; }
