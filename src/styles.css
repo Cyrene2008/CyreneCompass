@@ -8,7 +8,7 @@ body { margin: 0; overflow: hidden; background: transparent; }
 button, input, select { font: inherit; }
 button, input, select { -webkit-app-region: no-drag; }
 button { border: 0; cursor: pointer; color: inherit; } button:disabled { cursor: default; opacity: .55; }
-.app-shell { background: color-mix(in srgb, var(--bg-card-solid) calc(var(--panel-alpha, 1) * 100%), transparent); color: var(--text-primary); transform: scale(var(--ui-scale)); transform-origin: top left; width: calc(100% / var(--ui-scale)); height: calc(100vh / var(--ui-scale)); min-width: 100%; border: 0; border-radius: 12px; overflow: hidden; backdrop-filter: blur(16px); box-shadow: none; font-family: var(--font-ui); --bg-card: var(--widget-card, var(--bg-card-solid)); --border-default: var(--widget-border, var(--border-subtle)); --radius-lg: 8px; --shadow-4: 0 8px 20px rgba(0,0,0,.08); }
+.app-shell { background: color-mix(in srgb, var(--bg-card-solid) calc(var(--panel-alpha, 1) * 100%), transparent); color: var(--text-primary); transform: scale(var(--ui-scale)); transform-origin: top left; width: calc(100% / var(--ui-scale)); height: calc(100vh / var(--ui-scale)); min-width: calc(100% / var(--ui-scale)); border: 0; border-radius: 12px; overflow: hidden; backdrop-filter: blur(16px); box-shadow: none; font-family: var(--font-ui); --bg-card: var(--widget-card, var(--bg-card-solid)); --border-default: var(--widget-border, var(--border-subtle)); --radius-lg: 8px; --shadow-4: 0 8px 20px rgba(0,0,0,.08); }
 html { scrollbar-width: none; } html::-webkit-scrollbar { display: none; }
 .transitioning .mode-surface { pointer-events: none; }
 .ball-mode.app-shell { background: transparent; border: 0; box-shadow: none; backdrop-filter: none; }
