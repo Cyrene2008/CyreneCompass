@@ -338,8 +338,8 @@ async fn set_window_mode(app: tauri::AppHandle, mode: String, opacity: f64, widt
         let start_y = old_position.y as f64;
         let target_x = new_position.x as f64;
         let target_y = new_position.y as f64;
-        for frame in 1..=10 {
-            let t = frame as f64 / 10.0;
+        for frame in 1..=6 {
+            let t = frame as f64 / 6.0;
             let eased = 1.0 - (1.0 - t).powi(3);
             let frame_w = (start_w + (target_w - start_w) * eased).round().max(44.0) as u32;
             let frame_h = (start_h + (target_h - start_h) * eased).round().max(44.0) as u32;
@@ -347,7 +347,7 @@ async fn set_window_mode(app: tauri::AppHandle, mode: String, opacity: f64, widt
             let frame_y = (start_y + (target_y - start_y) * eased).round() as i32;
             win.set_size(PhysicalSize::new(frame_w, frame_h)).map_err(|e| e.to_string())?;
             win.set_position(PhysicalPosition::new(frame_x, frame_y)).map_err(|e| e.to_string())?;
-            std::thread::sleep(Duration::from_millis(8));
+            std::thread::sleep(Duration::from_millis(10));
         }
     }
     win.set_size(PhysicalSize::new(physical_w.max(44) as u32, physical_h.max(44) as u32)).map_err(|e| e.to_string())?;
@@ -910,8 +910,11 @@ pub fn run() {
         create_tray(app)?;
         #[cfg(target_os = "windows")]
         {
-            use windows_sys::Win32::System::Threading::{GetCurrentProcess, SetPriorityClass, HIGH_PRIORITY_CLASS};
-            unsafe { SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS); }
+            use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread, SetPriorityClass, SetThreadPriority, ABOVE_NORMAL_PRIORITY_CLASS, THREAD_PRIORITY_ABOVE_NORMAL};
+            unsafe {
+                SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
+                SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+            }
         }
         #[cfg(target_os = "windows")]
         if let Some(window) = app.get_webview_window("main") {
