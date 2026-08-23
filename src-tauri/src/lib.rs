@@ -12,6 +12,8 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize};
 
+mod compass_mode;
+
 const INSTANCE_PORT: u16 = 47682;
 const INSTANCE_PING: &[u8] = b"CYRENE_COMPASS_SHOW\n";
 const INSTANCE_ACK: &[u8] = b"CYRENE_COMPASS_ACK\n";
@@ -380,7 +382,7 @@ fn monitor_work_area(x: i32, y: i32) -> (i32, i32, i32, i32) {
 }
 
 #[cfg(target_os = "windows")]
-fn monitor_bounds(x: i32, y: i32) -> (i32, i32, i32, i32) {
+pub(crate) fn monitor_bounds(x: i32, y: i32) -> (i32, i32, i32, i32) {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST};
     unsafe {
@@ -841,10 +843,20 @@ fn configure_startup(enabled: bool, mode: String) -> Result<serde_json::Value, S
 }
 
 #[tauri::command]
+fn set_compass_mode(enabled: bool, hold_ms: u64, hijack: bool) {
+    compass_mode::set_config(enabled, hold_ms, hijack);
+}
+
+#[tauri::command]
+fn open_submenu_compass(app: tauri::AppHandle, item_id: String) {
+    let _ = app.emit("compass-show-requested", serde_json::json!({ "itemId": item_id }));
+}
+
+#[tauri::command]
 fn quit_app(app: tauri::AppHandle) { app.exit(0); }
 
 #[cfg(target_os = "windows")]
-fn set_no_activate(hwnd: windows_sys::Win32::Foundation::HWND, enabled: bool) {
+pub(crate) fn set_no_activate(hwnd: windows_sys::Win32::Foundation::HWND, enabled: bool) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_SHOWWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW};
     unsafe {
         let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
@@ -856,7 +868,7 @@ fn set_no_activate(hwnd: windows_sys::Win32::Foundation::HWND, enabled: bool) {
 }
 
 #[cfg(target_os = "windows")]
-fn raise_topmost(hwnd: windows_sys::Win32::Foundation::HWND) {
+pub(crate) fn raise_topmost(hwnd: windows_sys::Win32::Foundation::HWND) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowPos, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE};
     unsafe { SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); }
 }
@@ -911,6 +923,7 @@ pub fn run() {
     tauri::Builder::default().plugin(tauri_plugin_dialog::init()).setup(move |app| {
         start_instance_listener(app.handle().clone(), listener);
         create_tray(app)?;
+        compass_mode::init(app.handle().clone());
         #[cfg(target_os = "windows")]
         {
             use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread, SetPriorityClass, SetThreadPriority, ABOVE_NORMAL_PRIORITY_CLASS, THREAD_PRIORITY_ABOVE_NORMAL};
@@ -940,5 +953,5 @@ pub fn run() {
             }
         }
         Ok(())
-    }).invoke_handler(tauri::generate_handler![main_window_ready, set_ball_anchor, restore_ball_position, move_window_clamped, set_window_mode, system_accent, inspect_path, read_visual_data_url, execute_action, configure_startup, check_update, download_and_launch_update, open_external, quit_app, load_settings, save_settings]).run(tauri::generate_context!()).expect("error while running Cyrene Compass");
+    }).invoke_handler(tauri::generate_handler![main_window_ready, set_ball_anchor, restore_ball_position, move_window_clamped, set_window_mode, system_accent, inspect_path, read_visual_data_url, execute_action, configure_startup, check_update, download_and_launch_update, open_external, set_compass_mode, open_submenu_compass, quit_app, load_settings, save_settings]).run(tauri::generate_context!()).expect("error while running Cyrene Compass");
 }

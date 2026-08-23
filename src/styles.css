@@ -101,3 +101,24 @@ h1 { margin: 0; font-size: 28px; } .lead { color: var(--text-secondary); margin:
 .icon-grid .custom-icon-choice { display: flex; flex-direction: column; gap: 2px; color: var(--accent); }
 .custom-icon-choice span { font-size: 9px; }
 @media (max-width: 700px) { .dock { width: 58px; padding: 10px 6px; } .dock-item { justify-content: center; padding: 11px 7px; } .dock-item label { display: none; } .settings-content { padding: 22px 16px; } .action-row { grid-template-columns: 14px 38px 1fr 28px; } .admin-check { display: none; } .action-main { grid-template-columns: 1fr; } .action-main small { grid-column: auto; } .update-heading { align-items: flex-start; flex-direction: column; } .about-details > div { grid-template-columns: 1fr; gap: 3px; padding: 5px 0; } .contributors-grid { grid-template-columns: 1fr; } }
+
+/* ===== 桌面罗盘模式（长按 Tab 全屏 overlay） ===== */
+.tab-compass-hint { margin: 2px 0 8px; color: var(--text-muted); font-size: 12px; line-height: 1.6; max-width: 540px; }
+.overlay-root { position: fixed; inset: 0; overflow: hidden; background: transparent; }
+.radial-stage { position: fixed; inset: 0; display: grid; place-items: center; z-index: 1; }
+/* 完整环形应用栏 */
+.dial { position: relative; width: var(--dial-size); height: var(--dial-size); border-radius: 50%; background: radial-gradient(circle at 50% 38%, rgba(66,58,88,.38), rgba(18,16,28,.5)); backdrop-filter: blur(18px) saturate(1.15); box-shadow: 0 18px 60px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.08), inset 0 0 80px rgba(255,255,255,.05); }
+.dial-outline { position: absolute; inset: 5px; border-radius: 50%; border: 1px solid rgba(255,255,255,.20); pointer-events: none; }
+.dial-inner-line { position: absolute; inset: 12%; border-radius: 50%; border: 1px dashed rgba(255,255,255,.14); pointer-events: none; }
+.dial-glow { position: absolute; left: 50%; top: 50%; width: calc(var(--glow-radius) * 2); height: calc(var(--glow-radius) * 2); margin: calc(var(--glow-radius) * -1) 0 0 calc(var(--glow-radius) * -1); transform: rotate(var(--glow-angle)); border-radius: 50%; border: 2.5px solid transparent; border-top-color: var(--accent); filter: drop-shadow(0 0 8px var(--accent)); pointer-events: none; }
+.dial-item { position: absolute; left: 50%; top: 50%; width: var(--slot-size); height: var(--slot-size); transform: translate(-50%,-50%) rotate(var(--slot-angle)) translateY(calc(var(--slot-offset) * -1)) rotate(calc(var(--slot-angle) * -1)); display: grid; place-items: center; background: transparent; border: 0; color: #fff; padding: 0; }
+.dial-item.empty { visibility: hidden; opacity: 0; }
+.dial-item-icon { width: 100%; height: 100%; display: grid; place-items: center; }
+.dial-item-icon svg, .dial-item-icon img { width: 80%; height: 80%; object-fit: contain; }
+.dial-item-icon svg { color: #efeaf2; filter: drop-shadow(0 2px 5px rgba(0,0,0,.45)); }
+.dial-item.active .dial-item-icon svg, .dial-item.active .dial-item-icon img { color: #fff; filter: drop-shadow(0 0 9px var(--accent)) drop-shadow(0 0 2px rgba(255,255,255,.9)); }
+.dial-chevron { position: absolute; right: 3px; top: 3px; color: rgba(255,255,255,.85); filter: drop-shadow(0 1px 3px rgba(0,0,0,.6)); }
+.dial-center { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); width: 36%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle at 50% 40%, rgba(58,50,74,.55), rgba(22,20,32,.62)); backdrop-filter: blur(10px); box-shadow: 0 0 0 1px rgba(255,255,255,.13), inset 0 0 40px rgba(255,255,255,.05), 0 12px 40px rgba(0,0,0,.4); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; color: #fff; }
+.dial-center-emblem { width: 42%; height: 42%; color: #f3d8a6; filter: drop-shadow(0 0 6px rgba(243,216,166,.6)); }
+.dial-center-label { font-size: 14px; line-height: 1; color: #f0ecef; max-width: 78%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 6px rgba(0,0,0,.5); }
+.radial-hint { position: fixed; left: 50%; bottom: 8vh; transform: translateX(-50%); z-index: 2; padding: 11px 20px; border-radius: 999px; background: color-mix(in srgb, var(--bg-card-solid) 88%, transparent); border: 1px solid var(--border-subtle); backdrop-filter: blur(20px); color: var(--text-primary); font-size: 14px; box-shadow: 0 8px 24px rgba(0,0,0,.22); white-space: nowrap; }
