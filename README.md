@@ -9,6 +9,7 @@ Cyreneの罗盘是面向 Windows 10/11 与触屏一体机的 Fluent 风格快捷
 ## 当前功能
 
 - 常驻桌面的可拖动悬浮球，左键或触摸展开罗盘；右键与触屏长按不会触发操作。
+- 桌面罗盘模式：在任意界面长按 Tab（默认 1 秒，可在设置中调整），一个完整的玻璃质感环形应用栏在屏幕中央展开；始终以屏幕中心为原点，鼠标朝某个方向移动即选中并高亮对应应用（中央同步显示其名称），松开 Tab 立即启动，移回中心松开则取消。子菜单选项松开后会直接打开对应的罗盘子菜单。可选劫持 Tab 键：按下时不会立即发送给应用，松开后才生效一次（系统级 Alt+Tab / Win+Tab 不受影响），长按满设定时长依然打开罗盘。
 - 触屏拖动使用物理坐标手动定位与串行事件合并，在高 DPI 和多屏环境下避免抖动、跳动和移动距离缩短。
 - 3×3 罗盘布局：中央按钮负责关闭或返回上一级，其余 8 个位置可配置动作或子菜单。
 - 每次展开都从首页开始；动作执行成功后自动收起。
@@ -37,6 +38,13 @@ Cyreneの罗盘是面向 Windows 10/11 与触屏一体机的 Fluent 风格快捷
 
 ```powershell
 bun test
+```
+
+Rust 单元测试（桌面罗盘方向计算、迟滞与死区逻辑）：
+
+```powershell
+cd src-tauri
+cargo test
 ```
 
 ```powershell
@@ -76,7 +84,9 @@ bun run tauri:build
 
 ```text
 src/                         Vue 界面、主题、i18n、离线 Fluent 图标
+src/CompassOverlay.vue       桌面罗盘模式的径向罗盘 overlay 界面
 src-tauri/src/lib.rs         Windows 窗口、托盘、IPC、动作与启动任务
+src-tauri/src/compass_mode.rs 全局 Tab 长按检测、方向跟踪与 overlay 窗口管理
 src-tauri/windows-app-manifest.xml  Windows 应用清单
 public/cyrene.png            应用 Logo
 ```
