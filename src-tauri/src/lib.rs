@@ -333,28 +333,9 @@ async fn set_window_mode(app: tauri::AppHandle, mode: String, opacity: f64, widt
         centered_x.clamp(work_left, (work_right - physical_w).max(work_left)),
         centered_y.clamp(work_top, (work_bottom - physical_h).max(work_top)),
     );
-    let should_animate = animate.unwrap_or(true);
-    if should_animate {
-        let start_w = old_size.width.max(44) as f64;
-        let start_h = old_size.height.max(44) as f64;
-        let target_w = physical_w.max(44) as f64;
-        let target_h = physical_h.max(44) as f64;
-        let start_x = old_position.x as f64;
-        let start_y = old_position.y as f64;
-        let target_x = new_position.x as f64;
-        let target_y = new_position.y as f64;
-        for frame in 1..=6 {
-            let t = frame as f64 / 6.0;
-            let eased = 1.0 - (1.0 - t).powi(3);
-            let frame_w = (start_w + (target_w - start_w) * eased).round().max(44.0) as u32;
-            let frame_h = (start_h + (target_h - start_h) * eased).round().max(44.0) as u32;
-            let frame_x = (start_x + (target_x - start_x) * eased).round() as i32;
-            let frame_y = (start_y + (target_y - start_y) * eased).round() as i32;
-            win.set_size(PhysicalSize::new(frame_w, frame_h)).map_err(|e| e.to_string())?;
-            win.set_position(PhysicalPosition::new(frame_x, frame_y)).map_err(|e| e.to_string())?;
-            std::thread::sleep(Duration::from_millis(10));
-        }
-    }
+    // ponytail: 原生逐帧 resize 动画已移除（低资源机器上的 2~3s 展开延迟热点）。
+    // 尺寸/位置一次到位，视觉过渡由前端 GSAP 对 .mode-surface 完成。
+    let _ = animate;
     win.set_size(PhysicalSize::new(physical_w.max(44) as u32, physical_h.max(44) as u32)).map_err(|e| e.to_string())?;
     win.set_position(new_position).map_err(|e| e.to_string())?;
     if mode == "ball" { if let Ok(mut anchor) = BALL_ANCHOR.lock() { *anchor = None; } }
@@ -857,10 +838,11 @@ fn quit_app(app: tauri::AppHandle) { app.exit(0); }
 
 #[cfg(target_os = "windows")]
 pub(crate) fn set_no_activate(hwnd: windows_sys::Win32::Foundation::HWND, enabled: bool) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_SHOWWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_SHOWWINDOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW};
     unsafe {
         let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
         let next = if enabled { style | WS_EX_NOACTIVATE as i32 | WS_EX_TOOLWINDOW as i32 } else { (style & !(WS_EX_NOACTIVATE as i32)) | WS_EX_TOOLWINDOW as i32 };
+        let next = next & !(WS_EX_APPWINDOW as i32);
         SetWindowLongW(hwnd, GWL_EXSTYLE, next);
         let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_SHOWWINDOW | if enabled { SWP_NOACTIVATE } else { 0 };
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
@@ -905,6 +887,40 @@ fn watch_foreground_changes(hwnd: windows_sys::Win32::Foundation::HWND) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn is_window_visible_iconic(hwnd: windows_sys::Win32::Foundation::HWND) -> (bool, bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindowVisible};
+    unsafe {
+        let visible = IsWindowVisible(hwnd) != 0;
+        let iconic = IsIconic(hwnd) != 0;
+        (visible, iconic)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn keep_window_visible(hwnd: windows_sys::Win32::Foundation::HWND) {
+    // Win+D / 显示桌面 会最小化或隐藏普通置顶窗口；此处将其按非激活方式恢复。
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_SHOWNA};
+    unsafe { ShowWindow(hwnd, SW_SHOWNA); }
+}
+
+#[cfg(target_os = "windows")]
+fn watch_window_visibility(hwnd: windows_sys::Win32::Foundation::HWND) {
+    let handle = hwnd as isize;
+    thread::spawn(move || loop {
+        let hwnd = handle as windows_sys::Win32::Foundation::HWND;
+        if hwnd.is_null() {
+            break;
+        }
+        let (visible, iconic) = is_window_visible_iconic(hwnd);
+        if iconic || !visible {
+            keep_window_visible(hwnd);
+            raise_topmost(hwnd);
+        }
+        thread::sleep(Duration::from_millis(500));
+    });
+}
+
 fn create_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let settings = MenuItem::with_id(app, "settings", "打开设置", true, None::<&str>)?; let menu = Menu::with_items(app, &[&settings])?;
     TrayIconBuilder::with_id("compass-tray").icon(app.default_window_icon().cloned().unwrap()).tooltip("Cyreneの罗盘").menu(&menu).show_menu_on_left_click(false).on_tray_icon_event(|tray, event| { if let tauri::tray::TrayIconEvent::Click { button: tauri::tray::MouseButton::Left, button_state: tauri::tray::MouseButtonState::Up, .. } = event { let _ = tray.app_handle().emit("compass-show-requested", ()); } }).on_menu_event(|app, event| { if event.id.as_ref() == "settings" { let _ = app.emit("compass-settings-requested", ()); } }).build(app)?; Ok(())
@@ -937,6 +953,7 @@ pub fn run() {
             if let Ok(hwnd) = window.hwnd() {
                 set_no_activate(hwnd.0, true);
                 watch_foreground_changes(hwnd.0);
+                watch_window_visibility(hwnd.0);
                 let handle = hwnd.0 as isize;
                 thread::spawn(move || {
                     let hwnd_handle = handle as windows_sys::Win32::Foundation::HWND;

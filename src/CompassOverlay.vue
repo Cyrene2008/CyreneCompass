@@ -105,7 +105,7 @@ async function onRelease(dir) {
     invoke('open_submenu_compass', { itemId: item.id }).catch(() => {})
     return
   }
-  invoke('execute_action', { target: item.target || '', elevated: !!item.elevated, script: item.kind === 'script' }).catch(() => {})
+  invoke('execute_action', { target: item.target || '', elevated: !!item.elevated, script: !!item.script }).catch(() => {})
 }
 
 onMounted(async () => {

@@ -1,32 +1,12 @@
 export const DRAG_THRESHOLD = 5
 
-export function clientOffsetToPhysical(clientX, clientY, scaleFactor) {
+// 统一的“屏幕增量”拖动模型：窗口从上次已应用位置跟随指针的绝对屏幕位移，
+// 乘 DPI 缩放得到物理像素。鼠标与触屏共用——触屏不用 clientX/Y 相对窗口坐标，
+// 否则串行队列滞后消费旧采样时会用旧坐标套新窗口位置，导致窗口回退/不跟手。
+export function pointerDragTarget(previousTarget, previousScreen, currentScreen, scaleFactor) {
   return {
-    x: clientX * scaleFactor,
-    y: clientY * scaleFactor
-  }
-}
-
-export function pointerAbsolutePhysical(windowPosition, clientPosition, scaleFactor) {
-  const offset = clientOffsetToPhysical(clientPosition.x, clientPosition.y, scaleFactor)
-  return {
-    x: windowPosition.x + offset.x,
-    y: windowPosition.y + offset.y
-  }
-}
-
-export function touchDragTarget(windowPosition, clientPosition, scaleFactor, grabOffset) {
-  const pointer = pointerAbsolutePhysical(windowPosition, clientPosition, scaleFactor)
-  return {
-    x: Math.round(pointer.x - grabOffset.x),
-    y: Math.round(pointer.y - grabOffset.y)
-  }
-}
-
-export function mouseDragTarget(windowPosition, previousScreen, currentScreen, scaleFactor) {
-  return {
-    x: Math.round(windowPosition.x + (currentScreen.x - previousScreen.x) * scaleFactor),
-    y: Math.round(windowPosition.y + (currentScreen.y - previousScreen.y) * scaleFactor)
+    x: Math.round(previousTarget.x + (currentScreen.x - previousScreen.x) * scaleFactor),
+    y: Math.round(previousTarget.y + (currentScreen.y - previousScreen.y) * scaleFactor)
   }
 }
 
