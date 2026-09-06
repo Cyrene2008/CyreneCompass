@@ -1,6 +1,6 @@
 [package]
 name = "cyrene-compass"
-version = "26.0.2"
+version = "26.0.3"
 description = "Cyrene Compass"
 authors = ["Cyrene2008"]
 edition = "2021"
