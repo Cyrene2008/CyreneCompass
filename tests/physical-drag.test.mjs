@@ -1,53 +1,42 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  clientOffsetToPhysical,
   createLatestMoveQueue,
   createPointerMoveState,
   exceedsDragThreshold,
-  mouseDragTarget,
-  pointerAbsolutePhysical,
-  touchDragTarget
+  pointerDragTarget
 } from '../src/utils/physicalDrag.js'
 
-test('restores the absolute touch point from physical window position', () => {
+test('incremental drag target follows pointer delta in physical pixels', () => {
   assert.deepEqual(
-    pointerAbsolutePhysical({ x: 1200, y: 400 }, { x: 80, y: 36 }, 1.5),
-    { x: 1320, y: 454 }
-  )
-})
-
-test('touch movement is not halved at 200 percent scaling', () => {
-  const grabOffset = clientOffsetToPhysical(20, 20, 2)
-  const target = touchDragTarget(
-    { x: 100, y: 200 },
-    { x: 70, y: 45 },
-    2,
-    grabOffset
-  )
-  assert.deepEqual(target, { x: 200, y: 250 })
-})
-
-test('touch target remains stable after the window has already moved', () => {
-  const grabOffset = clientOffsetToPhysical(30, 25, 1.5)
-  const first = touchDragTarget({ x: 600, y: 300 }, { x: 70, y: 45 }, 1.5, grabOffset)
-  const second = touchDragTarget(first, { x: 30, y: 25 }, 1.5, grabOffset)
-  assert.deepEqual(first, { x: 660, y: 330 })
-  assert.deepEqual(second, first)
-})
-
-test('mouse movement remains incremental in physical pixels', () => {
-  assert.deepEqual(
-    mouseDragTarget({ x: 500, y: 240 }, { x: 100, y: 80 }, { x: 112, y: 74 }, 1.5),
+    pointerDragTarget({ x: 500, y: 240 }, { x: 100, y: 80 }, { x: 112, y: 74 }, 1.5),
     { x: 518, y: 231 }
   )
 })
 
-test('delayed processing uses the window position captured with the event', () => {
-  const grabOffset = clientOffsetToPhysical(20, 20, 1.5)
-  const eventWindowPosition = { x: 300, y: 180 }
-  const target = touchDragTarget(eventWindowPosition, { x: 60, y: 40 }, 1.5, grabOffset)
-  assert.deepEqual(target, { x: 360, y: 210 })
+test('touch uses the same screen-delta model as mouse', () => {
+  assert.deepEqual(
+    pointerDragTarget({ x: 660, y: 330 }, { x: 70, y: 45 }, { x: 30, y: 25 }, 1.5),
+    { x: 600, y: 300 }
+  )
+})
+
+test('drag target always moves forward even when samples are consumed late', () => {
+  let applied = { x: 100, y: 100 }
+  let previousScreen = { x: 200, y: 200 }
+  const screens = [{ x: 260, y: 210 }, { x: 320, y: 220 }, { x: 400, y: 250 }]
+  for (const screen of screens) {
+    applied = pointerDragTarget(applied, previousScreen, screen, 1)
+    previousScreen = screen
+  }
+  assert.deepEqual(applied, { x: 300, y: 150 })
+})
+
+test('drag target uses strict physical deltas at 200 percent scaling', () => {
+  assert.deepEqual(
+    pointerDragTarget({ x: 100, y: 200 }, { x: 20, y: 20 }, { x: 70, y: 45 }, 2),
+    { x: 200, y: 250 }
+  )
 })
 
 test('drag threshold remains strictly greater than five pixels', () => {
