@@ -212,11 +212,11 @@ async fn download_update_bytes(app: &tauri::AppHandle, url: &str, expected_size:
         .build()
         .map_err(|error| error.to_string())?;
     let candidates = [
-        url.to_string(),
         format!("https://v4.gh-proxy.com/{}", url),
         format!("https://gh.昔涟.cn/{}", url),
         format!("https://ghproxy.net/{}", url),
         format!("https://ghfast.top/{}", url),
+        url.to_string(),
     ];
     let display_url = |value: &str| value.replace("https://v4.gh-proxy.com/", "https://gh-proxy.com/");
     let mut failures = Vec::new();
