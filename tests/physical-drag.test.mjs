@@ -95,34 +95,34 @@ test('pointer queue observes a drag controller attached after pointer creation',
   assert.deepEqual(moved, [{ x: 42, y: 24 }])
 })
 
-test('touch client-offset drag target places window so finger stays fixed relative to grab', () => {
+test('touch screen-delta drag with grab offset tracks finger at scale 1.5', () => {
   const windowPos = { x: 400, y: 200 }
   const factor = 1.5
-  const startClient = { x: 100, y: 80 }
+  const startScreen = { x: 100, y: 80 }
   const grab = {
-    x: startClient.x * factor - windowPos.x,
-    y: startClient.y * factor - windowPos.y
+    x: startScreen.x * factor - windowPos.x,
+    y: startScreen.y * factor - windowPos.y
   }
-  const moveClient = { x: 120, y: 90 }
+  const moveScreen = { x: 120, y: 90 }
   const target = {
-    x: Math.round(moveClient.x * factor - grab.x),
-    y: Math.round(moveClient.y * factor - grab.y)
+    x: Math.round(moveScreen.x * factor - grab.x),
+    y: Math.round(moveScreen.y * factor - grab.y)
   }
   assert.deepEqual(target, { x: 430, y: 215 })
 })
 
-test('touch client-offset model at 200 percent scaling', () => {
+test('touch screen-delta drag with grab offset at 200 percent scaling', () => {
   const windowPos = { x: 100, y: 50 }
   const factor = 2
-  const startClient = { x: 30, y: 20 }
+  const startScreen = { x: 30, y: 20 }
   const grab = {
-    x: startClient.x * factor - windowPos.x,
-    y: startClient.y * factor - windowPos.y
+    x: startScreen.x * factor - windowPos.x,
+    y: startScreen.y * factor - windowPos.y
   }
-  const moveClient = { x: 45, y: 30 }
+  const moveScreen = { x: 45, y: 30 }
   const target = {
-    x: Math.round(moveClient.x * factor - grab.x),
-    y: Math.round(moveClient.y * factor - grab.y)
+    x: Math.round(moveScreen.x * factor - grab.x),
+    y: Math.round(moveScreen.y * factor - grab.y)
   }
   assert.deepEqual(target, { x: 130, y: 70 })
 })
