@@ -2,9 +2,9 @@
 
 Cyreneの罗盘是面向 Windows 10/11 与触屏一体机的 Fluent 风格快捷启动器。它使用 Vue 3、Tauri 2 与 GSAP 构建，默认主题色为桃粉色，并提供自定义单色主题与跟随 Windows 强调色的 Fluent 主题。
 
-当前稳定版本：**26.0.3**。安装包可从 [GitHub Releases](https://github.com/Cyrene2008/CyreneCompass/releases/tag/v26.0.3) 下载。
+当前稳定版本：**26.0.4**。安装包可从 [GitHub Releases](https://github.com/Cyrene2008/CyreneCompass/releases/tag/v26.0.4) 下载。
 
-发布页提供一个适用于普通用户的安装包：`CyreneCompass_26.0.3_x64-setup.exe`。安装到当前用户目录，不需要安装证书，也不要求用户拥有管理员凭据。
+发布页提供一个适用于普通用户的安装包：`CyreneCompass_26.0.4_x64-setup.exe`。安装到当前用户目录，不需要安装证书，也不要求用户拥有管理员凭据。
 
 ## 当前功能
 
@@ -68,7 +68,7 @@ bun run tauri:build
 
 安装包输出为：
 
-- `src-tauri/target/release/bundle/nsis/CyreneCompass_26.0.3_x64-setup.exe`
+- `src-tauri/target/release/bundle/nsis/CyreneCompass_26.0.4_x64-setup.exe`
 
 应用清单固定使用 `uiAccess=false`。项目不安装自签名证书，不复制系统进程令牌，也不要求安装到受保护目录。
 
@@ -93,7 +93,7 @@ public/cyrene.png            应用 Logo
 
 ## 说明
 
-项目当前版本为 `26.0.3`。配置以明文 JSON 保存在安装目录的 `data/cyrene-compass.json`，可直接随软件文件夹整体迁移；老版本用户首次启动会自动把 WebView 本地存储迁移到该文件。
+项目当前版本为 `26.0.4`。配置以明文 JSON 保存在安装目录的 `data/cyrene-compass.json`，可直接随软件文件夹整体迁移；老版本用户首次启动会自动把 WebView 本地存储迁移到该文件。
 
 - 作者：Cyrene2008 (星海昔涟)
 - 版权：Copyright (C) Cyrene2008 2026. All Rights Reserved.
