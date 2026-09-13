@@ -21,6 +21,23 @@ test('touch uses the same screen-delta model as mouse', () => {
   )
 })
 
+test('touch movement applies the window display scale once', () => {
+  assert.deepEqual(
+    pointerDragTarget({ x: 100, y: 200 }, { x: 20, y: 20 }, { x: 70, y: 45 }, 2),
+    { x: 200, y: 250 }
+  )
+})
+
+test('queued samples use the last applied sample as their baseline', async () => {
+  const pointer = createPointerMoveState({ lastScreenX: 0, lastScreenY: 0 })
+  const processed = []
+  pointer.drag = Promise.resolve({ move: sample => processed.push(sample) })
+  pointer.queue.push({ screenX: 10, screenY: 0 })
+  pointer.queue.push({ screenX: 20, screenY: 0 })
+  await pointer.queue.flush()
+  assert.deepEqual(processed, [{ screenX: 10, screenY: 0 }, { screenX: 20, screenY: 0 }])
+})
+
 test('drag target always moves forward even when samples are consumed late', () => {
   let applied = { x: 100, y: 100 }
   let previousScreen = { x: 200, y: 200 }
