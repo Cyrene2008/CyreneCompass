@@ -20,6 +20,29 @@ const INSTANCE_ACK: &[u8] = b"CYRENE_COMPASS_ACK\n";
 static READY: AtomicBool = AtomicBool::new(false);
 static TOPMOST_HWND: AtomicIsize = AtomicIsize::new(0);
 static BALL_ANCHOR: Mutex<Option<(i32, i32)>> = Mutex::new(None);
+
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+struct TouchSample {
+    x: f64,
+    y: f64,
+}
+
+#[cfg(target_os = "windows")]
+struct TouchDragState {
+    generation: u64,
+    active: bool,
+    start: (f64, f64),
+    scale: f64,
+    hwnd: isize,
+    latest: Option<TouchSample>,
+}
+
+#[cfg(target_os = "windows")]
+static TOUCH_DRAG: Mutex<Option<TouchDragState>> = Mutex::new(None);
+#[cfg(target_os = "windows")]
+static TOUCH_DRAG_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 const UPDATE_URL_PREFIX: &str = "https://github.com/Cyrene2008/CyreneCompass/releases/download/";
 const UPDATE_MIN_INSTALLER_SIZE: usize = 1024 * 1024;
 
@@ -164,6 +187,122 @@ fn move_window_clamped(app: tauri::AppHandle, x: i32, y: i32) -> Result<Restored
     let target = clamp_target(x, y, size.width, size.height, WorkArea { left, top, right, bottom });
     win.set_position(PhysicalPosition::new(target.x, target.y)).map_err(|e| e.to_string())?;
     Ok(target)
+}
+
+// Touch dragging runs a native loop in Rust so the window follows the finger without
+// per-move IPC round trips through the JS/main-thread queue. Each sample is applied
+// against the window's current physical position plus the pointer delta since drag
+// start, which stays stable even when samples are consumed late.
+fn touch_drag_target(current: (i32, i32), start: (f64, f64), sample: (f64, f64), scale: f64) -> (i32, i32) {
+    (
+        current.0 + ((sample.0 - start.0) * scale).round() as i32,
+        current.1 + ((sample.1 - start.1) * scale).round() as i32,
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn touch_drag_step(hwnd: windows_sys::Win32::Foundation::HWND, generation: u64, sample: TouchSample) {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER};
+    let (start, scale) = {
+        let guard = match TOUCH_DRAG.lock() { Ok(value) => value, Err(_) => return };
+        match guard.as_ref() {
+            Some(state) if state.generation == generation => (state.start, state.scale),
+            _ => return,
+        }
+    };
+    let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    if unsafe { GetWindowRect(hwnd, &mut rect) } == 0 { return; }
+    let (target_x, target_y) = touch_drag_target((rect.left, rect.top), start, (sample.x, sample.y), scale);
+    let width = (rect.right - rect.left).max(0) as u32;
+    let height = (rect.bottom - rect.top).max(0) as u32;
+    let center_x = i64::from(target_x) + i64::from(width) / 2;
+    let center_y = i64::from(target_y) + i64::from(height) / 2;
+    let (left, top, right, bottom) = monitor_bounds(
+        center_x.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        center_y.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+    );
+    let target = clamp_target(target_x, target_y, width, height, WorkArea { left, top, right, bottom });
+    unsafe { SetWindowPos(hwnd, std::ptr::null_mut(), target.x, target.y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE); }
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_touch_drag_loop(generation: u64, hwnd: isize) {
+    thread::spawn(move || {
+        let hwnd = hwnd as windows_sys::Win32::Foundation::HWND;
+        loop {
+            let (active, sample) = {
+                let mut guard = match TOUCH_DRAG.lock() { Ok(value) => value, Err(_) => return };
+                match guard.as_mut() {
+                    Some(state) if state.generation == generation => (state.active, state.latest.take()),
+                    _ => return,
+                }
+            };
+            if let Some(sample) = sample { touch_drag_step(hwnd, generation, sample); }
+            if !active { return; }
+            thread::sleep(Duration::from_millis(2));
+        }
+    });
+}
+
+#[tauri::command]
+fn begin_touch_drag(app: tauri::AppHandle, x: f64, y: f64) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let win = app.get_webview_window("main").ok_or("主窗口不存在")?;
+        let hwnd = win.hwnd().map_err(|error| error.to_string())?;
+        let scale = win.scale_factor().map_err(|error| error.to_string())?;
+        let generation = TOUCH_DRAG_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+        {
+            let mut guard = TOUCH_DRAG.lock().map_err(|_| "拖动状态锁定失败")?;
+            *guard = Some(TouchDragState { generation, active: true, start: (x, y), scale, hwnd: hwnd.0 as isize, latest: None });
+        }
+        spawn_touch_drag_loop(generation, hwnd.0 as isize);
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    { let _ = (app, x, y); Err("仅支持 Windows 触屏拖动".into()) }
+}
+
+#[tauri::command]
+fn update_touch_drag(x: f64, y: f64) {
+    #[cfg(target_os = "windows")]
+    if let Ok(mut guard) = TOUCH_DRAG.lock() {
+        if let Some(state) = guard.as_mut() { state.latest = Some(TouchSample { x, y }); }
+    }
+    #[cfg(not(target_os = "windows"))]
+    { let _ = (x, y); }
+}
+
+#[tauri::command]
+fn end_touch_drag() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let (generation, hwnd) = {
+            let mut guard = TOUCH_DRAG.lock().map_err(|_| "拖动状态锁定失败")?;
+            match guard.as_mut() {
+                Some(state) => { state.active = false; (state.generation, state.hwnd) }
+                None => return Ok(()),
+            }
+        };
+        thread::sleep(Duration::from_millis(8));
+        let sample = {
+            let mut guard = match TOUCH_DRAG.lock() { Ok(value) => value, Err(_) => return Ok(()) };
+            match guard.as_mut() {
+                Some(state) if state.generation == generation => state.latest.take(),
+                _ => None,
+            }
+        };
+        if let Some(sample) = sample { touch_drag_step(hwnd as windows_sys::Win32::Foundation::HWND, generation, sample); }
+        if let Ok(mut guard) = TOUCH_DRAG.lock() {
+            if let Some(state) = guard.as_ref() {
+                if state.generation == generation { *guard = None; }
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    { Ok(()) }
 }
 
 #[tauri::command]
@@ -470,6 +609,31 @@ mod position_tests {
     fn extreme_coordinates_do_not_overflow() {
         let result = restore_target(i32::MAX, i32::MIN, u32::MAX, u32::MAX, None, PRIMARY);
         assert_eq!((result.x, result.y, result.reset), (0, 0, true));
+    }
+}
+
+#[cfg(test)]
+mod touch_drag_tests {
+    use super::touch_drag_target;
+
+    #[test]
+    fn follows_the_pointer_delta_from_the_current_window_position() {
+        assert_eq!(touch_drag_target((400, 200), (100.0, 80.0), (120.0, 90.0), 1.5), (430, 215));
+    }
+
+    #[test]
+    fn applies_each_sample_against_the_latest_window_position() {
+        assert_eq!(touch_drag_target((430, 215), (100.0, 80.0), (140.0, 80.0), 1.0), (470, 215));
+    }
+
+    #[test]
+    fn scales_client_deltas_once_at_two_hundred_percent() {
+        assert_eq!(touch_drag_target((100, 50), (30.0, 20.0), (45.0, 30.0), 2.0), (130, 70));
+    }
+
+    #[test]
+    fn keeps_position_when_the_pointer_does_not_move() {
+        assert_eq!(touch_drag_target((555, 333), (50.0, 60.0), (50.0, 60.0), 1.75), (555, 333));
     }
 }
 
@@ -970,5 +1134,5 @@ pub fn run() {
             }
         }
         Ok(())
-    }).invoke_handler(tauri::generate_handler![main_window_ready, set_ball_anchor, restore_ball_position, move_window_clamped, set_window_mode, system_accent, inspect_path, read_visual_data_url, execute_action, configure_startup, check_update, download_and_launch_update, open_external, set_compass_mode, open_submenu_compass, quit_app, load_settings, save_settings]).run(tauri::generate_context!()).expect("error while running Cyrene Compass");
+    }).invoke_handler(tauri::generate_handler![main_window_ready, set_ball_anchor, restore_ball_position, move_window_clamped, begin_touch_drag, update_touch_drag, end_touch_drag, set_window_mode, system_accent, inspect_path, read_visual_data_url, execute_action, configure_startup, check_update, download_and_launch_update, open_external, set_compass_mode, open_submenu_compass, quit_app, load_settings, save_settings]).run(tauri::generate_context!()).expect("error while running Cyrene Compass");
 }
