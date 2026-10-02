@@ -76,7 +76,7 @@
                   <button class="danger-btn" @click="removeSelected"><Icon icon="fluent:delete-24-regular" />{{ t('delete') }}</button>
                 </div>
                 </template>
-                <div v-else class="inspector-empty"><Icon icon="fluent:app-generic-24-regular" /><p>啥都木有</p></div>
+                <div v-else class="inspector-empty"><Icon icon="fluent:app-generic-24-regular" /><p>{{ t('inspectorEmpty') }}</p></div>
                 </div>
               </aside>
             </div>
