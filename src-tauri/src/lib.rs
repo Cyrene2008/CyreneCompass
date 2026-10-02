@@ -18,6 +18,7 @@ const INSTANCE_PORT: u16 = 47682;
 const INSTANCE_PING: &[u8] = b"CYRENE_COMPASS_SHOW\n";
 const INSTANCE_ACK: &[u8] = b"CYRENE_COMPASS_ACK\n";
 static READY: AtomicBool = AtomicBool::new(false);
+static QUITTING: AtomicBool = AtomicBool::new(false);
 static TOPMOST_HWND: AtomicIsize = AtomicIsize::new(0);
 static BALL_ANCHOR: Mutex<Option<(i32, i32)>> = Mutex::new(None);
 
@@ -418,7 +419,7 @@ async fn download_and_launch_update(app: tauri::AppHandle, url: String, file_nam
         if result <= 32 { return Err(format!("无法启动更新安装程序：{}", result)); }
     }
     let exit_handle = app.clone();
-    thread::spawn(move || { thread::sleep(Duration::from_millis(1500)); exit_handle.exit(0); });
+    thread::spawn(move || { thread::sleep(Duration::from_millis(1500)); QUITTING.store(true, Ordering::Release); exit_handle.exit(0); });
     Ok(serde_json::json!({ "success": true, "filePath": path.to_string_lossy(), "size": bytes.len() }))
 }
 
@@ -998,7 +999,7 @@ fn open_submenu_compass(app: tauri::AppHandle, item_id: String) {
 }
 
 #[tauri::command]
-fn quit_app(app: tauri::AppHandle) { app.exit(0); }
+fn quit_app(app: tauri::AppHandle) { QUITTING.store(true, Ordering::Release); app.exit(0); }
 
 #[cfg(target_os = "windows")]
 pub(crate) fn set_no_activate(hwnd: windows_sys::Win32::Foundation::HWND, enabled: bool) {
@@ -1069,19 +1070,49 @@ fn keep_window_visible(hwnd: windows_sys::Win32::Foundation::HWND) {
 }
 
 #[cfg(target_os = "windows")]
-fn watch_window_visibility(hwnd: windows_sys::Win32::Foundation::HWND) {
+pub(crate) fn ensure_taskbar_hidden(hwnd: windows_sys::Win32::Foundation::HWND) {
+    // 兜底保证窗口带 WS_EX_TOOLWINDOW 且不带 WS_EX_APPWINDOW，防止任务栏偶发出现图标。
+    // 只有样式异常时才动作（隐藏-改样式-非激活显示），正常运行零开销。
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetWindowLongW, IsWindowVisible, SetWindowLongW, SetWindowPos, ShowWindow, GWL_EXSTYLE, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_HIDE, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW};
+    unsafe {
+        let style = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        let wanted = (style | WS_EX_TOOLWINDOW as i32) & !(WS_EX_APPWINDOW as i32);
+        if wanted == style { return; }
+        let visible = IsWindowVisible(hwnd) != 0;
+        if visible { ShowWindow(hwnd, SW_HIDE); }
+        SetWindowLongW(hwnd, GWL_EXSTYLE, wanted);
+        let flags = SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | if visible { SWP_SHOWWINDOW } else { 0 };
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn watch_window_visibility(hwnd: windows_sys::Win32::Foundation::HWND, overlay_hwnd: isize) {
     let handle = hwnd as isize;
-    thread::spawn(move || loop {
-        let hwnd = handle as windows_sys::Win32::Foundation::HWND;
-        if hwnd.is_null() {
-            break;
+    thread::spawn(move || {
+        let mut tick: u32 = 0;
+        loop {
+            let hwnd = handle as windows_sys::Win32::Foundation::HWND;
+            if hwnd.is_null() {
+                break;
+            }
+            let (visible, iconic) = is_window_visible_iconic(hwnd);
+            if iconic || !visible {
+                keep_window_visible(hwnd);
+                raise_topmost(hwnd);
+            } else if tick % 30 == 0 {
+                // 每 15 秒保底无焦点置顶一次：防止层级变化/其他置顶窗口把球压住。
+                // 仅 SetWindowPos(SWP_NOACTIVATE)，不唤醒渲染器、不抢焦点、不重绘。
+                raise_topmost(hwnd);
+            }
+            ensure_taskbar_hidden(hwnd);
+            let overlay = overlay_hwnd as windows_sys::Win32::Foundation::HWND;
+            if !overlay.is_null() {
+                ensure_taskbar_hidden(overlay);
+            }
+            tick = tick.wrapping_add(1);
+            thread::sleep(Duration::from_millis(500));
         }
-        let (visible, iconic) = is_window_visible_iconic(hwnd);
-        if iconic || !visible {
-            keep_window_visible(hwnd);
-            raise_topmost(hwnd);
-        }
-        thread::sleep(Duration::from_millis(500));
     });
 }
 
@@ -1106,10 +1137,26 @@ pub fn run() {
         compass_mode::init(app.handle().clone());
         #[cfg(target_os = "windows")]
         {
-            use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread, SetPriorityClass, SetThreadPriority, ABOVE_NORMAL_PRIORITY_CLASS, THREAD_PRIORITY_ABOVE_NORMAL};
+            use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetCurrentThread, SetPriorityClass, SetThreadPriority, SetProcessInformation, ProcessPowerThrottling, PROCESS_POWER_THROTTLING_STATE, PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED, ABOVE_NORMAL_PRIORITY_CLASS, THREAD_PRIORITY_ABOVE_NORMAL};
             unsafe {
                 SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS);
                 SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+                let throttling = PROCESS_POWER_THROTTLING_STATE {
+                    Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                    ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+                    StateMask: 0,
+                };
+                SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &throttling as *const _ as *const std::ffi::c_void, std::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32);
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            for window in app.webview_windows().values() {
+                window.on_window_event(|event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        if !QUITTING.load(Ordering::Acquire) { api.prevent_close(); }
+                    }
+                });
             }
         }
         #[cfg(target_os = "windows")]
@@ -1117,7 +1164,8 @@ pub fn run() {
             if let Ok(hwnd) = window.hwnd() {
                 set_no_activate(hwnd.0, true);
                 watch_foreground_changes(hwnd.0);
-                watch_window_visibility(hwnd.0);
+                let overlay_hwnd = app.get_webview_window("compass-overlay").and_then(|overlay| overlay.hwnd().ok()).map(|overlay| overlay.0 as isize).unwrap_or(0);
+                watch_window_visibility(hwnd.0, overlay_hwnd);
                 let handle = hwnd.0 as isize;
                 thread::spawn(move || {
                     let hwnd_handle = handle as windows_sys::Win32::Foundation::HWND;
